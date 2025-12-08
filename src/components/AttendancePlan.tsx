@@ -7,6 +7,7 @@ import AdjustmentTable from './AdjustmentTable';
 export default function AttendancePlan() {
   const [employees, setEmployees] = useState<Employee[]>(mockEmployees);
   const [adjustments, setAdjustments] = useState<Adjustment[]>(mockAdjustments);
+  const [selectedShift, setSelectedShift] = useState('All');
 
   const dates = ['12/5', '12/6', '12/7', '12/8', '12/9', '12/10', '12/11', '12/12'];
 
@@ -15,6 +16,10 @@ export default function AttendancePlan() {
     setEmployees(newEmployees);
     alert('Auto-assign completed (Mock)');
   };
+
+  const filteredEmployees = selectedShift === 'All' 
+    ? employees 
+    : employees.filter(emp => emp.shiftTeam === selectedShift);
 
   const getShiftClass = (team: string) => {
     switch (team) {
@@ -49,7 +54,17 @@ export default function AttendancePlan() {
             </div>
             <div className='flex gap-2'>
               {['All', 'Green', 'Blue', 'Orange', 'Yellow'].map(filter => (
-                <button key={filter} className='btn btn-ghost' style={{ fontSize: '12px', padding: '4px 12px' }}>
+                <button 
+                  key={filter} 
+                  onClick={() => setSelectedShift(filter)}
+                  className={`btn ${selectedShift === filter ? 'btn-secondary' : 'btn-ghost'}`}
+                  style={{ 
+                    fontSize: '12px', 
+                    padding: '4px 12px',
+                    backgroundColor: selectedShift === filter ? '#eff6ff' : 'transparent',
+                    color: selectedShift === filter ? 'var(--accent-blue)' : 'inherit'
+                  }}
+                >
                   {filter}
                 </button>
               ))}
@@ -87,7 +102,7 @@ export default function AttendancePlan() {
               </tr>
             </thead>
             <tbody>
-              {employees.map((emp) => (
+              {filteredEmployees.map((emp) => (
                 <tr key={emp.id}>
                   <td style={{ color: '#666' }}>{emp.id}</td>
                   <td style={{ fontWeight: '500' }}>{emp.name}</td>
