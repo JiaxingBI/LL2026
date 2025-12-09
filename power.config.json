@@ -1,8 +1,8 @@
 {
-  "appId": "",
-  "appDisplayName": "App From Scratch",
+  "appId": "27fdf297-51f5-41da-8dc7-e0201e74d883",
+  "appDisplayName": "LaborLink",
   "description": null,
-  "environmentId": "2f748ff5-5b97-e180-a132-e3fe17813019",
+  "environmentId": "558480fb-f006-eb81-8453-61565adacd1a",
   "buildPath": "./dist",
   "buildEntryPoint": "index.html",
   "logoPath": "Default",

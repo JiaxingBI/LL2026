@@ -1,4 +1,54 @@
-import type { Employee, Adjustment, AssemblyLine } from '../types';
+import type { Employee, Adjustment, AssemblyLine, ShiftEntry } from '../types';
+
+// Shift rotation: 4 days work (2 Day + 2 Night), 4 days rest
+// Each shift team starts at a different point in the 8-day cycle
+
+// Generate all dates for the current year (1/1 to 12/31)
+function generateAllDates(): string[] {
+  const year = new Date().getFullYear();
+  const dates: string[] = [];
+  for (let month = 0; month < 12; month++) {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      dates.push(`${month + 1}/${day}`);
+    }
+  }
+  return dates;
+}
+
+const allDates = generateAllDates();
+
+// Shift team cycle offsets (each team is offset by 2 days)
+const shiftTeamOffsets: Record<string, number> = {
+  'Green': 0,   // Day 1 of cycle: Day shift
+  'Blue': 2,    // Day 3 of cycle: Night shift  
+  'Orange': 4,  // Day 5 of cycle: Rest
+  'Yellow': 6   // Day 7 of cycle: Rest
+};
+
+// Generate shift pattern for all days based on offset
+// Cycle: Day 0-1: Day shift (12h), Day 2-3: Night shift (12h), Day 4-7: Rest
+function generateShifts(shiftTeam: string): Record<string, ShiftEntry> {
+  const offset = shiftTeamOffsets[shiftTeam] || 0;
+  const shifts: Record<string, ShiftEntry> = {};
+  
+  allDates.forEach((date, index) => {
+    const cycleDay = (index + offset) % 8;
+    
+    if (cycleDay === 0 || cycleDay === 1) {
+      // Day shift days
+      shifts[date] = { day: '12', night: '' };
+    } else if (cycleDay === 2 || cycleDay === 3) {
+      // Night shift days
+      shifts[date] = { day: '', night: '12' };
+    } else {
+      // Rest days (4-7)
+      shifts[date] = { day: '', night: '' };
+    }
+  });
+  
+  return shifts;
+}
 
 export const mockEmployees: Employee[] = [
   {
@@ -9,7 +59,7 @@ export const mockEmployees: Employee[] = [
     status: 'Prod.',
     shiftTeam: 'Green',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Green')
   },
   {
     id: '2',
@@ -19,7 +69,7 @@ export const mockEmployees: Employee[] = [
     status: 'Prod.',
     shiftTeam: 'Blue',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Blue')
   },
   {
     id: '3',
@@ -29,7 +79,7 @@ export const mockEmployees: Employee[] = [
     status: 'Prod.',
     shiftTeam: 'Orange',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Orange')
   },
   {
     id: '4',
@@ -39,7 +89,7 @@ export const mockEmployees: Employee[] = [
     status: 'Jail',
     shiftTeam: 'Yellow',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Yellow')
   },
   {
     id: '5',
@@ -49,7 +99,7 @@ export const mockEmployees: Employee[] = [
     status: 'Prod.',
     shiftTeam: 'Green',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Green')
   },
   {
     id: '6',
@@ -59,7 +109,7 @@ export const mockEmployees: Employee[] = [
     status: 'Prod.',
     shiftTeam: 'Blue',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Blue')
   },
   {
     id: '7',
@@ -69,7 +119,7 @@ export const mockEmployees: Employee[] = [
     status: 'DailyProduction',
     shiftTeam: 'Orange',
     gender: 'Male',
-    shifts: {}
+    shifts: generateShifts('Orange')
   }
 ];
 

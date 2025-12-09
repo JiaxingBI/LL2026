@@ -10,12 +10,12 @@ function App() {
 
   return (
     <LanguageProvider>
-      <div style={{ minHeight: '100vh', background: 'var(--bg-color)', fontFamily: 'var(--font-sans)', color: 'var(--text-primary)' }}>
+      <div style={{ width: '100%', minHeight: '100vh', height: '100%', background: 'var(--bg-color)', fontFamily: 'var(--font-sans)', color: 'var(--text-primary)', display: 'flex', flexDirection: 'column' }}>
         {activeTab !== 'employee' && (
           <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
         )}
         
-        <main>
+        <main style={{ flex: 1, width: '100%', overflow: 'auto' }}>
           {activeTab === 'attendance' && <AttendancePlan />}
           {activeTab === 'assembly' && <LaborScheduling />}
           {activeTab === 'employee' && <EmployeeView onBack={() => setActiveTab('attendance')} />}

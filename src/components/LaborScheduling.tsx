@@ -21,7 +21,7 @@ export default function LaborScheduling() {
   };
 
   return (
-    <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', height: '100%' }}>
       {/* Header */}
       <div>
         <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0' }}>{t('labor.title')}</h1>

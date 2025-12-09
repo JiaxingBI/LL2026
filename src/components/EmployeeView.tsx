@@ -30,7 +30,7 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
   };
 
   return (
-    <div style={{ position: 'relative', minHeight: '100vh', background: '#F5F5F7' }}>
+    <div style={{ position: 'relative', width: '100%', minHeight: '100vh', height: '100%', background: '#F5F5F7' }}>
       {/* Top Header - Scan Bar */}
       <div style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '20px 24px', position: 'sticky', top: 0, zIndex: 40, boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' }}>
         <div style={{ maxWidth: '900px', margin: '0 auto' }}>

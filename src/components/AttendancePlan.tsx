@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, RefreshCw } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Search } from 'lucide-react';
 import { mockEmployees, mockAdjustments } from '../data/mockData';
 import type { Employee, Adjustment } from '../types';
 import AdjustmentTable from './AdjustmentTable';
@@ -7,11 +7,49 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 export default function AttendancePlan() {
   const { t } = useLanguage();
-  const [employees, setEmployees] = useState<Employee[]>(mockEmployees);
+  const [employees] = useState<Employee[]>(mockEmployees);
   const [adjustments, setAdjustments] = useState<Adjustment[]>(mockAdjustments);
   const [selectedShift, setSelectedShift] = useState('All');
+  const [filterNearDates, setFilterNearDates] = useState(true);
 
-  const dates = ['12/5', '12/6', '12/7', '12/8', '12/9', '12/10', '12/11', '12/12'];
+  // Generate all dates for the year (1/1 to 12/31)
+  const allDates = useMemo(() => {
+    const year = new Date().getFullYear();
+    const dates: string[] = [];
+    for (let month = 0; month < 12; month++) {
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        dates.push(`${month + 1}/${day}`);
+      }
+    }
+    return dates;
+  }, []);
+
+  // Filter dates: today - 4 to today + 12
+  const filteredDates = useMemo(() => {
+    if (!filterNearDates) return allDates;
+    
+    const today = new Date();
+    const year = today.getFullYear();
+    
+    const startDate = new Date(year, today.getMonth(), today.getDate() - 4);
+    const endDate = new Date(year, today.getMonth(), today.getDate() + 12);
+    
+    return allDates.filter(dateStr => {
+      const [month, day] = dateStr.split('/').map(Number);
+      const date = new Date(year, month - 1, day);
+      return date >= startDate && date <= endDate;
+    });
+  }, [allDates, filterNearDates]);
+
+  const dates = filteredDates;
+
+  // Check if a date string matches today
+  const isToday = (dateStr: string) => {
+    const today = new Date();
+    const [month, day] = dateStr.split('/').map(Number);
+    return today.getMonth() + 1 === month && today.getDate() === day;
+  };
 
   const filterKeys: Record<string, string> = {
     'All': 'filter.all',
@@ -19,12 +57,6 @@ export default function AttendancePlan() {
     'Blue': 'filter.blue',
     'Orange': 'filter.orange',
     'Yellow': 'filter.yellow'
-  };
-
-  const handleAutoAssign = () => {
-    const newEmployees = employees.map(emp => emp);
-    setEmployees(newEmployees);
-    alert(t('attendance.autoAssignComplete'));
   };
 
   const filteredEmployees = selectedShift === 'All' 
@@ -52,7 +84,7 @@ export default function AttendancePlan() {
   };
 
   return (
-    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', height: '100%' }}>
       {/* Header */}
       <div>
         <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0' }}>{t('attendance.title')}</h1>
@@ -89,52 +121,104 @@ export default function AttendancePlan() {
                 </button>
               ))}
             </div>
+            {/* Modern Toggle Switch */}
+            <div 
+              onClick={() => setFilterNearDates(!filterNearDates)}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '12px', 
+                cursor: 'pointer',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                background: filterNearDates ? '#eff6ff' : '#f5f5f5',
+                border: `1px solid ${filterNearDates ? 'var(--accent-blue)' : '#e0e0e0'}`,
+                transition: 'all 0.2s ease',
+                userSelect: 'none'
+              }}
+            >
+              <div style={{
+                width: '44px',
+                height: '24px',
+                borderRadius: '12px',
+                background: filterNearDates ? 'var(--accent-blue)' : '#ccc',
+                position: 'relative',
+                transition: 'all 0.2s ease',
+                flexShrink: 0
+              }}>
+                <div style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  background: 'white',
+                  position: 'absolute',
+                  top: '2px',
+                  left: filterNearDates ? '22px' : '2px',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }} />
+              </div>
+              <span style={{ 
+                fontSize: '14px', 
+                fontWeight: '500',
+                color: filterNearDates ? 'var(--accent-blue)' : '#666'
+              }}>
+                {t('attendance.nearDatesFilter')}
+              </span>
+            </div>
           </div>
-          <button 
-            onClick={handleAutoAssign}
-            className='btn btn-secondary'
-            style={{ color: 'var(--accent-blue)', background: '#eff6ff', border: 'none' }}
-          >
-            <RefreshCw size={16} />
-            {t('attendance.autoAssign')}
-          </button>
         </div>
 
-        <div className='table-container'>
-          <table>
+        <div className='table-container' style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead>
               <tr>
-                <th style={{ width: '50px' }}>{t('attendance.id')}</th>
-                <th style={{ width: '150px' }}>{t('attendance.name')}</th>
-                <th style={{ width: '100px' }}>{t('attendance.role')}</th>
-                <th style={{ width: '100px' }}>{t('attendance.id_status')}</th>
-                <th style={{ width: '100px' }}>{t('attendance.status')}</th>
-                <th style={{ width: '100px' }}>{t('attendance.shift')}</th>
-                <th style={{ width: '80px' }}>{t('attendance.gender')}</th>
-                {dates.map(date => (
-                  <>
-                    <th key={`${date}-day`} style={{ textAlign: 'center', minWidth: '60px', borderLeft: '1px solid #eee' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <span>{date}</span>
-                        <span style={{ fontSize: '10px', color: '#999', fontWeight: 'normal' }}>{t('attendance.day')}</span>
-                      </div>
-                    </th>
-                    <th key={`${date}-night`} style={{ textAlign: 'center', minWidth: '60px', borderLeft: '1px solid #eee' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <span>{date}</span>
-                        <span style={{ fontSize: '10px', color: '#999', fontWeight: 'normal' }}>{t('attendance.night')}</span>
-                      </div>
-                    </th>
-                  </>
-                ))}
+                <th style={{ width: '40px', minWidth: '40px', position: 'sticky', left: 0, background: '#fafafa', zIndex: 2 }}>{t('attendance.id')}</th>
+                <th style={{ width: '80px', minWidth: '80px', position: 'sticky', left: '40px', background: '#fafafa', zIndex: 2 }}>{t('attendance.name')}</th>
+                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', left: '120px', background: '#fafafa', zIndex: 2 }}>{t('attendance.role')}</th>
+                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', left: '190px', background: '#fafafa', zIndex: 2 }}>{t('attendance.id_status')}</th>
+                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', left: '260px', background: '#fafafa', zIndex: 2 }}>{t('attendance.status')}</th>
+                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', left: '330px', background: '#fafafa', zIndex: 2 }}>{t('attendance.shift')}</th>
+                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', left: '400px', background: '#fafafa', zIndex: 2, boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>{t('attendance.gender')}</th>
+                {dates.map(date => {
+                  const todayHighlight = isToday(date);
+                  const headerStyle = {
+                    textAlign: 'center' as const,
+                    minWidth: '60px',
+                    borderLeft: '1px solid #eee',
+                    ...(todayHighlight && {
+                      background: 'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)',
+                      color: 'white',
+                      boxShadow: '0 2px 8px rgba(59, 130, 246, 0.4)'
+                    })
+                  };
+                  return (
+                    <>
+                      <th key={`${date}-day`} style={headerStyle}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ fontWeight: todayHighlight ? 'bold' : 'normal' }}>{date}</span>
+                          <span style={{ fontSize: '10px', color: todayHighlight ? 'rgba(255,255,255,0.8)' : '#999', fontWeight: 'normal' }}>{t('attendance.day')}</span>
+                        </div>
+                      </th>
+                      <th key={`${date}-night`} style={headerStyle}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ fontWeight: todayHighlight ? 'bold' : 'normal' }}>{date}</span>
+                          <span style={{ fontSize: '10px', color: todayHighlight ? 'rgba(255,255,255,0.8)' : '#999', fontWeight: 'normal' }}>{t('attendance.night')}</span>
+                        </div>
+                      </th>
+                    </>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {filteredEmployees.map((emp) => (
-                <tr key={emp.id} style={{ backgroundColor: getRowBackgroundColor(emp.shiftTeam) }}>
-                  <td style={{ color: '#666' }}>{emp.id}</td>
-                  <td style={{ fontWeight: '500' }}>{emp.name}</td>
-                  <td style={{ color: '#666' }}>
+              {filteredEmployees.map((emp) => {
+                const rowBg = getRowBackgroundColor(emp.shiftTeam);
+                return (
+                <tr key={emp.id} style={{ backgroundColor: rowBg }}>
+                  <td style={{ color: '#666', position: 'sticky', left: 0, background: rowBg, zIndex: 1, width: '40px', minWidth: '40px' }}>{emp.id}</td>
+                  <td style={{ fontWeight: '500', position: 'sticky', left: '40px', background: rowBg, zIndex: 1, width: '80px', minWidth: '80px' }}>{emp.name}</td>
+                  <td style={{ color: '#666', position: 'sticky', left: '120px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
                     <select defaultValue={emp.role} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
                       <option value="TC.L1">TC.L1</option>
                       <option value="TC.L2">TC.L2</option>
@@ -145,20 +229,20 @@ export default function AttendancePlan() {
                       <option value="Ops.L1">Ops.L1</option>
                     </select>
                   </td>
-                  <td style={{ color: '#666' }}>
+                  <td style={{ color: '#666', position: 'sticky', left: '190px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
                     <select defaultValue={emp.indirectDirect} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
                       <option value="Direct">{t('id.direct')}</option>
                       <option value="Indirect">{t('id.indirect')}</option>
                     </select>
                   </td>
-                  <td style={{ color: '#666' }}>
+                  <td style={{ color: '#666', position: 'sticky', left: '260px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
                     <select defaultValue={emp.status} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
                       <option value="Prod.">Prod.</option>
                       <option value="Jail">Jail</option>
                       <option value="DailyProduction">DailyProduction</option>
                     </select>
                   </td>
-                  <td>
+                  <td style={{ position: 'sticky', left: '330px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
                     <select defaultValue={emp.shiftTeam} className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}>
                       <option value="Green">{t('filter.green')}</option>
                       <option value="Blue">{t('filter.blue')}</option>
@@ -166,7 +250,7 @@ export default function AttendancePlan() {
                       <option value="Yellow">{t('filter.yellow')}</option>
                     </select>
                   </td>
-                  <td style={{ color: '#666' }}>
+                  <td style={{ color: '#666', position: 'sticky', left: '400px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px', boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>
                     <select defaultValue={emp.gender} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
                       <option value="Male">{t('gender.male')}</option>
                       <option value="Female">{t('gender.female')}</option>
@@ -191,7 +275,8 @@ export default function AttendancePlan() {
                     </>
                   ))}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
