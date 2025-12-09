@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Calendar, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import type { Adjustment } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface AdjustmentTableProps {
   adjustments: Adjustment[];
@@ -8,6 +9,7 @@ interface AdjustmentTableProps {
 }
 
 export default function AdjustmentTable({ adjustments, setAdjustments }: AdjustmentTableProps) {
+  const { t } = useLanguage();
   const [isExpanded, setIsExpanded] = useState(true);
 
   const updateAdjustment = (id: string, field: keyof Adjustment, value: string) => {
@@ -46,7 +48,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
         style={{ width: '100%', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa', border: 'none', cursor: 'pointer', borderBottom: isExpanded ? '1px solid var(--border-color)' : 'none' }}
       >
         <div className="flex items-center gap-2">
-          <h2 style={{ fontSize: '14px', fontWeight: '600', margin: 0 }}>Adjustment Log</h2>
+          <h2 style={{ fontSize: '14px', fontWeight: '600', margin: 0 }}>{t('adjustment.title')}</h2>
           <span style={{ padding: '2px 8px', background: '#fee2e2', color: '#dc2626', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>{adjustments.length}</span>
         </div>
         {isExpanded ? <ChevronUp size={16} color="#666" /> : <ChevronDown size={16} color="#666" />}
@@ -57,12 +59,12 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Duration</th>
-                <th>Date</th>
-                <th>Shift</th>
-                <th>Notes</th>
+                <th>{t('adjustment.name')}</th>
+                <th>{t('adjustment.type')}</th>
+                <th>{t('adjustment.duration')}</th>
+                <th>{t('adjustment.date')}</th>
+                <th>{t('adjustment.shift')}</th>
+                <th>{t('adjustment.notes')}</th>
                 <th style={{ width: '40px' }}></th>
               </tr>
             </thead>
@@ -74,7 +76,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
                       type="text" 
                       value={adj.name}
                       onChange={(e) => updateAdjustment(adj.id, 'name', e.target.value)}
-                      placeholder="Name"
+                      placeholder={t('adjustment.name')}
                       style={{ width: '100%', border: 'none', background: 'transparent' }}
                     />
                   </td>
@@ -84,9 +86,9 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
                       onChange={(e) => updateAdjustment(adj.id, 'type', e.target.value)}
                       style={{ border: 'none', background: 'transparent' }}
                     >
-                      <option value="Leave">Leave</option>
-                      <option value="Overtime">Overtime</option>
-                      <option value="Transfer">Transfer</option>
+                      <option value="Leave">{t('adjustment.leave')}</option>
+                      <option value="Overtime">{t('adjustment.overtime')}</option>
+                      <option value="Transfer">{t('adjustment.transfer')}</option>
                     </select>
                   </td>
                   <td>
@@ -94,7 +96,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
                       type="text" 
                       value={adj.duration}
                       onChange={(e) => updateAdjustment(adj.id, 'duration', e.target.value)}
-                      placeholder="e.g. 2h"
+                      placeholder={t('adjustment.durationPlaceholder')}
                       style={{ width: '100%', border: 'none', background: 'transparent' }}
                     />
                   </td>
@@ -115,8 +117,8 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
                       onChange={(e) => updateAdjustment(adj.id, 'shift', e.target.value)}
                       style={{ border: 'none', background: 'transparent' }}
                     >
-                      <option value="D">Day</option>
-                      <option value="N">Night</option>
+                      <option value="D">{t('adjustment.day')}</option>
+                      <option value="N">{t('adjustment.night')}</option>
                     </select>
                   </td>
                   <td>
@@ -124,7 +126,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
                       type="text" 
                       value={adj.notes}
                       onChange={(e) => updateAdjustment(adj.id, 'notes', e.target.value)}
-                      placeholder="Add notes..."
+                      placeholder={t('adjustment.addNotes')}
                       style={{ width: '100%', border: 'none', background: 'transparent' }}
                     />
                   </td>
@@ -144,7 +146,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments }: Adjustm
           <div style={{ padding: '12px', background: '#fafafa', borderTop: '1px solid var(--border-color)' }}>
             <button onClick={addAdjustment} className="btn btn-ghost" style={{ fontSize: '13px' }}>
               <Plus size={16} />
-              Add Adjustment
+              {t('adjustment.add')}
             </button>
           </div>
         </div>

@@ -3,12 +3,14 @@ import { Scan, Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, Arr
 import LaborScheduling from './LaborScheduling'; // Reuse the board for the background
 import { mockEmployees } from '../data/mockData';
 import type { Employee } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface EmployeeViewProps {
   onBack?: () => void;
 }
 
 export default function EmployeeView({ onBack }: EmployeeViewProps) {
+  const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
 
@@ -23,7 +25,7 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
       setSelectedEmployee(employee);
       setSearchQuery('');
     } else {
-      alert('Employee not found (Try "Alex" or "1")');
+      alert(t('employee.notFound'));
     }
   };
 
@@ -48,8 +50,8 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
                 <Scan size={28} color="white" />
               </div>
               <div>
-                <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#111827', margin: 0, letterSpacing: '-0.5px' }}>Employee Kiosk</h1>
-                <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>Scan your QR code or search to view your schedule</p>
+                <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#111827', margin: 0, letterSpacing: '-0.5px' }}>{t('employee.title')}</h1>
+                <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>{t('employee.subtitle')}</p>
               </div>
             </div>
           </div>
@@ -61,7 +63,7 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
               type="text" 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name or employee ID... (Try: Alex, 1, Ben)" 
+              placeholder={t('employee.searchPlaceholder')} 
               className="input"
               style={{ 
                 width: '100%', 
@@ -90,7 +92,7 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
                 fontSize: '14px'
               }}
             >
-              Search
+              {t('employee.search')}
             </button>
           </form>
         </div>
@@ -114,7 +116,7 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
                 <div>
                   <h2 style={{ fontSize: '32px', fontWeight: 'bold', color: 'white', margin: 0, textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>{selectedEmployee.name}</h2>
                   <div className="flex items-center gap-3" style={{ marginTop: '6px' }}>
-                    <span style={{ padding: '4px 12px', background: 'rgba(255, 255, 255, 0.2)', color: 'white', fontSize: '12px', fontWeight: 'bold', borderRadius: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', backdropFilter: 'blur(10px)' }}>Active</span>
+                    <span style={{ padding: '4px 12px', background: 'rgba(255, 255, 255, 0.2)', color: 'white', fontSize: '12px', fontWeight: 'bold', borderRadius: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', backdropFilter: 'blur(10px)' }}>{t('employee.active')}</span>
                     <span style={{ fontSize: '14px', color: 'rgba(255, 255, 255, 0.9)', fontFamily: 'monospace', fontWeight: '500' }}>ID: {selectedEmployee.id}</span>
                   </div>
                 </div>
@@ -136,21 +138,21 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
               <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '4px', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
                 <div style={{ padding: '8px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Calendar size={16} color="#3b82f6" />
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.025em' }}>Current Assignment</span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.025em' }}>{t('employee.currentAssignment')}</span>
                 </div>
                 <div className="grid grid-cols-2" style={{ padding: '20px', gap: '24px' }}>
                   <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '16px' }}>
-                    <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px', margin: 0 }}>Location</p>
+                    <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px', margin: 0 }}>{t('employee.location')}</p>
                     <div className="flex items-center gap-2" style={{ color: '#111827', fontWeight: 'bold', fontSize: '18px' }}>
                       <MapPin size={20} color="#ef4444" />
                       P10B-SMP FULL FLEX NEW
                     </div>
                   </div>
                   <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '16px' }}>
-                    <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px', margin: 0 }}>Shift</p>
+                    <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px', margin: 0 }}>{t('employee.shift')}</p>
                     <div className="flex items-center gap-2" style={{ color: '#111827', fontWeight: 'bold', fontSize: '18px' }}>
                       <Clock size={20} color="#f97316" />
-                      Day Shift (07:00 - 19:00)
+                      {t('employee.dayShift')}
                     </div>
                   </div>
                 </div>
@@ -158,8 +160,8 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
                   <div className="flex items-start gap-3">
                     <Info size={20} color="#2563eb" style={{ marginTop: '2px' }} />
                     <div>
-                      <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e40af', margin: 0 }}>Special Instructions</p>
-                      <p style={{ fontSize: '14px', color: '#2563eb', marginTop: '4px', margin: 0 }}>19人来自11B，订单结束后返回 (19 people from 11B, return after order completion)</p>
+                      <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e40af', margin: 0 }}>{t('employee.specialInstructions')}</p>
+                      <p style={{ fontSize: '14px', color: '#2563eb', marginTop: '4px', margin: 0 }}>{t('employee.instructionText')}</p>
                     </div>
                   </div>
                 </div>
@@ -170,9 +172,9 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
                 <div style={{ padding: '8px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div className="flex items-center gap-2">
                     <Users size={16} color="#a855f7" />
-                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.025em' }}>Team Members</span>
+                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.025em' }}>{t('employee.teamMembers')}</span>
                   </div>
-                  <span style={{ fontSize: '12px', background: '#f3f4f6', color: '#4b5563', padding: '2px 8px', borderRadius: '9999px', fontWeight: '500' }}>4 Colleagues</span>
+                  <span style={{ fontSize: '12px', background: '#f3f4f6', color: '#4b5563', padding: '2px 8px', borderRadius: '9999px', fontWeight: '500' }}>4 {t('employee.colleagues')}</span>
                 </div>
                 <div style={{ padding: '20px', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                   {['Ben', 'Eric', 'Frank', 'George'].map((name) => (
@@ -190,30 +192,30 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
               <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '4px', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
                 <div style={{ padding: '8px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: '2px' }}>
                   <Calendar size={16} color="#f97316" />
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.025em' }}>Upcoming Schedule</span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.025em' }}>{t('employee.upcomingSchedule')}</span>
                 </div>
                 <div className="grid grid-cols-2" style={{ padding: '20px', gap: '16px' }}>
                   <div style={{ border: '1px solid #f3f4f6', borderRadius: '8px', padding: '16px' }}>
                     <div className="flex justify-between items-start" style={{ marginBottom: '8px' }}>
-                      <span style={{ fontWeight: 'bold', color: '#111827' }}>Tomorrow</span>
+                      <span style={{ fontWeight: 'bold', color: '#111827' }}>{t('employee.tomorrow')}</span>
                       <span style={{ fontSize: '12px', background: '#e5e7eb', color: '#4b5563', padding: '2px 6px', borderRadius: '4px' }}>SAT, DEC 6</span>
                     </div>
                     <div className="flex items-center gap-2" style={{ fontSize: '14px', color: '#4b5563' }}>
                       <CheckCircle size={16} color="#10b981" />
                       P10B-SMP FULL FLEX NEW
                     </div>
-                    <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', marginLeft: '24px', margin: 0 }}>Day Shift (07:00 - 19:00)</p>
+                    <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', marginLeft: '24px', margin: 0 }}>{t('employee.dayShift')}</p>
                   </div>
                   <div style={{ border: '1px solid #f3f4f6', borderRadius: '8px', padding: '16px' }}>
                     <div className="flex justify-between items-start" style={{ marginBottom: '8px' }}>
-                      <span style={{ fontWeight: 'bold', color: '#111827' }}>Day After</span>
+                      <span style={{ fontWeight: 'bold', color: '#111827' }}>{t('employee.dayAfter')}</span>
                       <span style={{ fontSize: '12px', background: '#e5e7eb', color: '#4b5563', padding: '2px 6px', borderRadius: '4px' }}>SUN, DEC 7</span>
                     </div>
                     <div className="flex items-center gap-2" style={{ fontSize: '14px', color: '#4b5563' }}>
                       <CheckCircle size={16} color="#10b981" />
                       P30A - ASSEMBLY SUPPORT
                     </div>
-                    <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', marginLeft: '24px', margin: 0 }}>Night Shift (19:00 - 07:00)</p>
+                    <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', marginLeft: '24px', margin: 0 }}>{t('employee.nightShift')}</p>
                   </div>
                 </div>
               </div>
@@ -234,7 +236,7 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
                   e.currentTarget.style.boxShadow = '0 10px 20px -5px rgba(102, 126, 234, 0.4)';
                 }}
               >
-                Close Schedule
+                {t('employee.closeSchedule')}
               </button>
             </div>
           </div>
