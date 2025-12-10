@@ -81,6 +81,9 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.noWorkers': 'No workers assigned',
     'labor.addWorker': 'Add Worker',
     'labor.shifts': 'shifts',
+    'labor.selectDate': 'Select Date',
+    'labor.selectWorker': 'Select Employee to Add',
+    'labor.close': 'Close',
     
     // Employee View
     'employee.title': 'Employee Kiosk',
@@ -174,6 +177,9 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.noWorkers': '未分配工人',
     'labor.addWorker': '添加工人',
     'labor.shifts': '班次',
+    'labor.selectDate': '选择日期',
+    'labor.selectWorker': '选择要添加的员工',
+    'labor.close': '关闭',
     
     // Employee View
     'employee.title': '员工自助终端',

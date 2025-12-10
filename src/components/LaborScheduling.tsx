@@ -1,12 +1,77 @@
-import { useState } from 'react';
-import { Users, Plus, MessageSquare, Info, Trash2 } from 'lucide-react';
-import { mockAssemblyLines } from '../data/mockData';
-import type { AssemblyLine } from '../types';
+import { useState, useRef } from 'react';
+import { Users, Plus, MessageSquare, Info, Trash2, Calendar, Search } from 'lucide-react';
+import { mockAssemblyLines, mockEmployees } from '../data/mockData';
+import type { AssemblyLine, Employee } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export default function LaborScheduling() {
   const { t } = useLanguage();
-  const [lines] = useState<AssemblyLine[]>(mockAssemblyLines);
+  const [lines, setLines] = useState<AssemblyLine[]>(mockAssemblyLines);
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [showAddWorkerDropdown, setShowAddWorkerDropdown] = useState(false);
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [availableEmployees] = useState<Employee[]>(mockEmployees);
+  const [workerSearchQuery, setWorkerSearchQuery] = useState('');
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+
+  const handleAddWorkerClick = (lineId: string) => {
+    const button = buttonRefs.current[lineId];
+    if (button) {
+      const rect = button.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY + 4,
+        left: rect.left + window.scrollX,
+        width: Math.max(rect.width, 280)
+      });
+    }
+    setSelectedLineId(lineId);
+    setWorkerSearchQuery('');
+    setShowAddWorkerDropdown(true);
+  };
+
+  const handleSelectEmployee = (employee: Employee) => {
+    if (!selectedLineId) return;
+    
+    setLines(prevLines => 
+      prevLines.map(line => {
+        if (line.id === selectedLineId) {
+          // Check if worker already assigned
+          const alreadyAssigned = line.assignedWorkers.some(w => w.employeeId === employee.id);
+          if (alreadyAssigned) return line;
+          
+          return {
+            ...line,
+            currentWorkers: line.currentWorkers + 1,
+            assignedWorkers: [
+              ...line.assignedWorkers,
+              {
+                employeeId: employee.id,
+                name: employee.name,
+                initials: employee.name.split(' ').map(n => n[0]).join('').toUpperCase(),
+                experienceCount: Math.floor(Math.random() * 50) + 1
+              }
+            ]
+          };
+        }
+        return line;
+      })
+    );
+    
+    setShowAddWorkerDropdown(false);
+    setSelectedLineId(null);
+    setWorkerSearchQuery('');
+  };
+
+  const getShiftClass = (team: string) => {
+    switch (team) {
+      case 'Green': return 'badge-green';
+      case 'Blue': return 'badge-blue';
+      case 'Orange': return 'badge-orange';
+      case 'Yellow': return 'badge-yellow';
+      default: return '';
+    }
+  };
 
   const getCapacityColor = (current: number, capacity: number) => {
     if (current > capacity) return 'var(--danger)';
@@ -80,15 +145,33 @@ export default function LaborScheduling() {
       </div>
 
       {/* Action Bar */}
-      <div className="flex" style={{ justifyContent: 'flex-end', gap: '12px' }}>
-        <button className="btn btn-secondary">
-          <MessageSquare size={16} />
-          {t('labor.notifyTeam')}
-        </button>
-        <button className="btn btn-primary">
-          <Plus size={16} />
-          {t('labor.addLine')}
-        </button>
+      <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+        <div className="flex items-center gap-2">
+          <Calendar size={18} color="var(--accent-blue)" />
+          <input 
+            type="date" 
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            style={{ 
+              padding: '8px 12px', 
+              border: '1px solid var(--border-color)', 
+              borderRadius: '8px', 
+              fontSize: '14px',
+              fontFamily: 'inherit',
+              cursor: 'pointer'
+            }}
+          />
+        </div>
+        <div className="flex" style={{ gap: '12px' }}>
+          <button className="btn btn-secondary">
+            <MessageSquare size={16} />
+            {t('labor.notifyTeam')}
+          </button>
+          <button className="btn btn-primary">
+            <Plus size={16} />
+            {t('labor.addLine')}
+          </button>
+        </div>
       </div>
 
       {/* Assembly Lines */}
@@ -144,13 +227,119 @@ export default function LaborScheduling() {
               )}
             </div>
 
-            <button className="btn btn-ghost" style={{ marginTop: '16px', width: '100%', border: '1px dashed #d1d5db', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+            <button 
+              ref={(el) => { buttonRefs.current[line.id] = el; }}
+              onClick={() => handleAddWorkerClick(line.id)}
+              className="btn btn-ghost" 
+              style={{ marginTop: '16px', width: '100%', border: '1px dashed #d1d5db', justifyContent: 'center', color: 'var(--text-secondary)' }}
+            >
               <Plus size={16} />
               {t('labor.addWorker')}
             </button>
           </div>
         ))}
       </div>
+
+      {/* Add Worker Dropdown */}
+      {showAddWorkerDropdown && dropdownPosition && (
+        <>
+          <div 
+            style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+            onClick={() => setShowAddWorkerDropdown(false)}
+          />
+          <div 
+            style={{ 
+              position: 'absolute',
+              top: dropdownPosition.top,
+              left: dropdownPosition.left,
+              width: dropdownPosition.width,
+              maxHeight: '300px',
+              background: 'white',
+              borderRadius: '8px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+              border: '1px solid var(--border-color)',
+              zIndex: 1000,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Search Bar */}
+            <div style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
+                <input 
+                  type="text"
+                  value={workerSearchQuery}
+                  onChange={(e) => setWorkerSearchQuery(e.target.value)}
+                  placeholder={t('attendance.search')}
+                  autoFocus
+                  style={{ 
+                    width: '100%',
+                    padding: '8px 8px 8px 32px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            </div>
+            {/* Employee List */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {availableEmployees
+                .filter(emp => 
+                  emp.name.toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                  emp.id.toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                  emp.role.toLowerCase().includes(workerSearchQuery.toLowerCase())
+                )
+                .map((employee) => (
+                  <div 
+                    key={employee.id} 
+                    onClick={() => handleSelectEmployee(employee)}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '10px', 
+                      padding: '10px 12px', 
+                      cursor: 'pointer',
+                      borderBottom: '1px solid #f3f4f6',
+                      transition: 'background 0.15s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ 
+                      width: '32px', 
+                      height: '32px', 
+                      borderRadius: '50%', 
+                      background: '#f9fafb', 
+                      border: '1px solid #e5e7eb', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      fontSize: '11px', 
+                      fontWeight: 'bold', 
+                      color: '#4b5563',
+                      flexShrink: 0
+                    }}>
+                      {employee.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: '13px', fontWeight: '500', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{employee.name}</p>
+                      <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>
+                        {employee.role}
+                      </p>
+                    </div>
+    scm-history-item:c%3A%5CUsers%5Ccn8IsaLi%5COneDrive%20-%20LEGO%5CDesktop%5Cgit.workspace%5CLaborLink%5CLaborLink_App?%7B%22repositoryId%22%3A%22scm0%22%2C%22historyItemId%22%3A%222b2bbc604972784ec29efd12f30db2b6af8fd518%22%2C%22historyItemParentId%22%3A%22059abad157eb5d20101886cfa5431a2f727d603b%22%2C%22historyItemDisplayId%22%3A%222b2bbc6%22%7D                <span className={`badge ${getShiftClass(employee.shiftTeam)}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                      {employee.shiftTeam}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

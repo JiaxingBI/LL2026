@@ -120,6 +120,186 @@ export const mockEmployees: Employee[] = [
     shiftTeam: 'Orange',
     gender: 'Male',
     shifts: generateShifts('Orange')
+  },
+  {
+    id: '8',
+    name: 'Helen',
+    role: 'TC.L1',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Yellow',
+    gender: 'Female',
+    shifts: generateShifts('Yellow')
+  },
+  {
+    id: '9',
+    name: 'Ivan',
+    role: 'TC.L2',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Green',
+    gender: 'Male',
+    shifts: generateShifts('Green')
+  },
+  {
+    id: '10',
+    name: 'Julia',
+    role: 'Infeeder',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Blue',
+    gender: 'Female',
+    shifts: generateShifts('Blue')
+  },
+  {
+    id: '11',
+    name: 'Kevin',
+    role: 'Sr.Infeeder',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Orange',
+    gender: 'Male',
+    shifts: generateShifts('Orange')
+  },
+  {
+    id: '12',
+    name: 'Lisa',
+    role: 'Hall Asist',
+    indirectDirect: 'Indirect',
+    status: 'Jail',
+    shiftTeam: 'Yellow',
+    gender: 'Female',
+    shifts: generateShifts('Yellow')
+  },
+  {
+    id: '13',
+    name: 'Mike',
+    role: 'TC.L3',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Green',
+    gender: 'Male',
+    shifts: generateShifts('Green')
+  },
+  {
+    id: '14',
+    name: 'Nancy',
+    role: 'Ops.L1',
+    indirectDirect: 'Indirect',
+    status: 'DailyProduction',
+    shiftTeam: 'Blue',
+    gender: 'Female',
+    shifts: generateShifts('Blue')
+  },
+  {
+    id: '15',
+    name: 'Oscar',
+    role: 'TC.L1',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Orange',
+    gender: 'Male',
+    shifts: generateShifts('Orange')
+  },
+  {
+    id: '16',
+    name: 'Patricia',
+    role: 'TC.L2',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Yellow',
+    gender: 'Female',
+    shifts: generateShifts('Yellow')
+  },
+  {
+    id: '17',
+    name: 'Quinn',
+    role: 'Infeeder',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Green',
+    gender: 'Male',
+    shifts: generateShifts('Green')
+  },
+  {
+    id: '18',
+    name: 'Rachel',
+    role: 'Sr.Infeeder',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Blue',
+    gender: 'Female',
+    shifts: generateShifts('Blue')
+  },
+  {
+    id: '19',
+    name: 'Steve',
+    role: 'TC.L3',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Orange',
+    gender: 'Male',
+    shifts: generateShifts('Orange')
+  },
+  {
+    id: '20',
+    name: 'Tina',
+    role: 'Hall Asist',
+    indirectDirect: 'Indirect',
+    status: 'Jail',
+    shiftTeam: 'Yellow',
+    gender: 'Female',
+    shifts: generateShifts('Yellow')
+  },
+  {
+    id: '21',
+    name: 'Victor',
+    role: 'Ops.L1',
+    indirectDirect: 'Indirect',
+    status: 'DailyProduction',
+    shiftTeam: 'Green',
+    gender: 'Male',
+    shifts: generateShifts('Green')
+  },
+  {
+    id: '22',
+    name: 'Wendy',
+    role: 'TC.L1',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Blue',
+    gender: 'Female',
+    shifts: generateShifts('Blue')
+  },
+  {
+    id: '23',
+    name: 'Xavier',
+    role: 'TC.L2',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Orange',
+    gender: 'Male',
+    shifts: generateShifts('Orange')
+  },
+  {
+    id: '24',
+    name: 'Yolanda',
+    role: 'Infeeder',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Yellow',
+    gender: 'Female',
+    shifts: generateShifts('Yellow')
+  },
+  {
+    id: '25',
+    name: 'Zack',
+    role: 'Sr.Infeeder',
+    indirectDirect: 'Direct',
+    status: 'Prod.',
+    shiftTeam: 'Green',
+    gender: 'Male',
+    shifts: generateShifts('Green')
   }
 ];
 
