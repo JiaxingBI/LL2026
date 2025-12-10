@@ -368,5 +368,75 @@ export const mockAssemblyLines: AssemblyLine[] = [
     capacity: 6,
     currentWorkers: 0,
     assignedWorkers: []
+  },
+  {
+    id: 'P13A',
+    name: 'P13A-ASSEMBLY LINE A',
+    capacity: 4,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P14B',
+    name: 'P14B-PACKAGING UNIT',
+    capacity: 3,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P15C',
+    name: 'P15C-QUALITY CHECK',
+    capacity: 2,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P16A',
+    name: 'P16A-MOLDING STATION',
+    capacity: 5,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P17B',
+    name: 'P17B-FINISHING LINE',
+    capacity: 4,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P18C',
+    name: 'P18C-SORTING AREA',
+    capacity: 3,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P19A',
+    name: 'P19A-PRINTING UNIT',
+    capacity: 2,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P20B',
+    name: 'P20B-TESTING STATION',
+    capacity: 4,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P21C',
+    name: 'P21C-DECORATION LINE',
+    capacity: 5,
+    currentWorkers: 0,
+    assignedWorkers: []
+  },
+  {
+    id: 'P22A',
+    name: 'P22A-FINAL ASSEMBLY',
+    capacity: 6,
+    currentWorkers: 0,
+    assignedWorkers: []
   }
 ];

@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Users, Plus, MessageSquare, Info, Trash2, Calendar, Search } from 'lucide-react';
+import { useState, useRef, useMemo } from 'react';
+import { Users, Plus, MessageSquare, Info, Trash2, ChevronDown, Search, X } from 'lucide-react';
 import { mockAssemblyLines, mockEmployees } from '../data/mockData';
 import type { AssemblyLine, Employee } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -7,22 +7,59 @@ import { useLanguage } from '../contexts/LanguageContext';
 export default function LaborScheduling() {
   const { t } = useLanguage();
   const [lines, setLines] = useState<AssemblyLine[]>(mockAssemblyLines);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedShift, setSelectedShift] = useState<string>('');
   const [showAddWorkerDropdown, setShowAddWorkerDropdown] = useState(false);
+
+  // Generate shift options for the next 7 days
+  const shiftOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      options.push(
+        { value: `${date.toISOString().split('T')[0]}-day`, label: `${dateStr} - Day Shift` },
+        { value: `${date.toISOString().split('T')[0]}-night`, label: `${dateStr} - Night Shift` }
+      );
+    }
+    return options;
+  }, []);
+
+  // Set default shift to today's day shift
+  useState(() => {
+    if (!selectedShift && shiftOptions.length > 0) {
+      setSelectedShift(shiftOptions[0].value);
+    }
+  });
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [availableEmployees] = useState<Employee[]>(mockEmployees);
   const [workerSearchQuery, setWorkerSearchQuery] = useState('');
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number; openUpward: boolean } | null>(null);
   const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  
+  // Drag and drop state
+  const [draggedWorker, setDraggedWorker] = useState<{ employeeId: string; fromLineId: string; name: string; initials: string; experienceCount: number } | null>(null);
+  const [dragOverLineId, setDragOverLineId] = useState<string | null>(null);
 
   const handleAddWorkerClick = (lineId: string) => {
     const button = buttonRefs.current[lineId];
     if (button) {
       const rect = button.getBoundingClientRect();
+      const dropdownHeight = 300; // max height of dropdown
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      
+      // Decide whether to open upward or downward based on available space
+      const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+      
       setDropdownPosition({
-        top: rect.bottom + window.scrollY + 4,
+        top: openUpward 
+          ? rect.top + window.scrollY - dropdownHeight - 4
+          : rect.bottom + window.scrollY + 4,
         left: rect.left + window.scrollX,
-        width: Math.max(rect.width, 280)
+        width: Math.max(rect.width, 280),
+        openUpward
       });
     }
     setSelectedLineId(lineId);
@@ -33,13 +70,15 @@ export default function LaborScheduling() {
   const handleSelectEmployee = (employee: Employee) => {
     if (!selectedLineId) return;
     
+    // Check if worker is already assigned to ANY line
+    const alreadyAssignedToAnyLine = lines.some(line => 
+      line.assignedWorkers.some(w => w.employeeId === employee.id)
+    );
+    if (alreadyAssignedToAnyLine) return;
+    
     setLines(prevLines => 
       prevLines.map(line => {
         if (line.id === selectedLineId) {
-          // Check if worker already assigned
-          const alreadyAssigned = line.assignedWorkers.some(w => w.employeeId === employee.id);
-          if (alreadyAssigned) return line;
-          
           return {
             ...line,
             currentWorkers: line.currentWorkers + 1,
@@ -57,10 +96,85 @@ export default function LaborScheduling() {
         return line;
       })
     );
+    // Keep dropdown open - don't close after selection
+  };
+
+  const handleRemoveWorker = (lineId: string, employeeId: string) => {
+    setLines(prevLines => 
+      prevLines.map(line => {
+        if (line.id === lineId) {
+          return {
+            ...line,
+            currentWorkers: Math.max(0, line.currentWorkers - 1),
+            assignedWorkers: line.assignedWorkers.filter(w => w.employeeId !== employeeId)
+          };
+        }
+        return line;
+      })
+    );
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, worker: { employeeId: string; name: string; initials: string; experienceCount: number }, fromLineId: string) => {
+    setDraggedWorker({ ...worker, fromLineId });
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, lineId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverLineId(lineId);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverLineId(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, toLineId: string) => {
+    e.preventDefault();
+    setDragOverLineId(null);
     
-    setShowAddWorkerDropdown(false);
-    setSelectedLineId(null);
-    setWorkerSearchQuery('');
+    if (!draggedWorker || draggedWorker.fromLineId === toLineId) {
+      setDraggedWorker(null);
+      return;
+    }
+
+    setLines(prevLines => 
+      prevLines.map(line => {
+        if (line.id === draggedWorker.fromLineId) {
+          // Remove from source line
+          return {
+            ...line,
+            currentWorkers: Math.max(0, line.currentWorkers - 1),
+            assignedWorkers: line.assignedWorkers.filter(w => w.employeeId !== draggedWorker.employeeId)
+          };
+        }
+        if (line.id === toLineId) {
+          // Add to target line
+          return {
+            ...line,
+            currentWorkers: line.currentWorkers + 1,
+            assignedWorkers: [
+              ...line.assignedWorkers,
+              {
+                employeeId: draggedWorker.employeeId,
+                name: draggedWorker.name,
+                initials: draggedWorker.initials,
+                experienceCount: draggedWorker.experienceCount
+              }
+            ]
+          };
+        }
+        return line;
+      })
+    );
+    
+    setDraggedWorker(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedWorker(null);
+    setDragOverLineId(null);
   };
 
   const getShiftClass = (team: string) => {
@@ -146,21 +260,29 @@ export default function LaborScheduling() {
 
       {/* Action Bar */}
       <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-        <div className="flex items-center gap-2">
-          <Calendar size={18} color="var(--accent-blue)" />
-          <input 
-            type="date" 
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
+        <div className="flex items-center gap-2" style={{ position: 'relative' }}>
+          <select
+            value={selectedShift}
+            onChange={(e) => setSelectedShift(e.target.value)}
             style={{ 
-              padding: '8px 12px', 
+              padding: '8px 36px 8px 12px', 
               border: '1px solid var(--border-color)', 
               borderRadius: '8px', 
               fontSize: '14px',
               fontFamily: 'inherit',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              appearance: 'none',
+              background: 'white',
+              minWidth: '220px'
             }}
-          />
+          >
+            {shiftOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} />
         </div>
         <div className="flex" style={{ gap: '12px' }}>
           <button className="btn btn-secondary">
@@ -175,25 +297,45 @@ export default function LaborScheduling() {
       </div>
 
       {/* Assembly Lines */}
-      <div className="grid grid-cols-4">
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', 
+        gap: '12px',
+        width: '100%'
+      }}>
         {lines.map((line) => (
-          <div key={line.id} className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div className="flex justify-between" style={{ alignItems: 'flex-start', marginBottom: '16px' }}>
-              <h3 style={{ fontWeight: 'bold', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>{line.name}</h3>
-              <Info size={16} color="#d1d5db" style={{ cursor: 'pointer' }} />
+          <div 
+            key={line.id} 
+            className="card" 
+            style={{ 
+              padding: '12px', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              height: '100%',
+              border: dragOverLineId === line.id ? '2px solid var(--accent-blue)' : undefined,
+              background: dragOverLineId === line.id ? '#f0f7ff' : undefined,
+              transition: 'border 0.15s, background 0.15s'
+            }}
+            onDragOver={(e) => handleDragOver(e, line.id)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, line.id)}
+          >
+            <div className="flex justify-between" style={{ alignItems: 'flex-start', marginBottom: '10px' }}>
+              <h3 style={{ fontWeight: 'bold', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', margin: 0, lineHeight: '1.2' }}>{line.name}</h3>
+              <Info size={12} color="#d1d5db" style={{ cursor: 'pointer', flexShrink: 0 }} />
             </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <div className="flex justify-between" style={{ fontSize: '12px', fontWeight: '500', marginBottom: '6px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <div className="flex justify-between" style={{ fontSize: '10px', fontWeight: '500', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>{t('labor.capacity')}</span>
                 <span style={{ color: getCapacityText(line.currentWorkers, line.capacity) }}>
                   {line.currentWorkers} <span style={{ color: '#d1d5db' }}>/</span> {line.capacity}
                 </span>
               </div>
-              <div style={{ width: '100%', background: '#f3f4f6', borderRadius: '999px', height: '6px' }}>
+              <div style={{ width: '100%', background: '#f3f4f6', borderRadius: '999px', height: '4px' }}>
                 <div 
                   style={{ 
-                    height: '6px', 
+                    height: '4px', 
                     borderRadius: '999px', 
                     transition: 'all 0.5s',
                     background: getCapacityColor(line.currentWorkers, line.capacity),
@@ -203,25 +345,54 @@ export default function LaborScheduling() {
               </div>
             </div>
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {line.assignedWorkers.length === 0 ? (
-                <div style={{ height: '128px', border: '2px dashed #f3f4f6', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
-                  <Users size={32} style={{ marginBottom: '8px', opacity: 0.2 }} />
-                  <span style={{ fontSize: '12px' }}>{t('labor.noWorkers')}</span>
+                <div style={{ height: '40px', border: '2px dashed #f3f4f6', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+                  <span style={{ fontSize: '10px' }}>{t('labor.noWorkers')}</span>
                 </div>
               ) : (
                 line.assignedWorkers.map((worker) => (
-                  <div key={worker.employeeId} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'white', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', color: '#4b5563' }}>
+                  <div 
+                    key={worker.employeeId} 
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, worker, line.id)}
+                    onDragEnd={handleDragEnd}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      padding: '4px 6px', 
+                      background: draggedWorker?.employeeId === worker.employeeId ? '#e5e7eb' : '#f9fafb', 
+                      borderRadius: '4px', 
+                      border: '1px solid #f3f4f6',
+                      cursor: 'grab',
+                      opacity: draggedWorker?.employeeId === worker.employeeId ? 0.5 : 1,
+                      transition: 'opacity 0.15s, background 0.15s'
+                    }}
+                  >
+                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 'bold', color: '#4b5563', flexShrink: 0 }}>
                       {worker.initials}
                     </div>
-                    <div>
-                      <p style={{ fontSize: '14px', fontWeight: '500', margin: 0 }}>{worker.name}</p>
-                      <p style={{ fontSize: '10px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '4px', margin: 0 }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#d1d5db', display: 'inline-block' }}></span>
-                        {worker.experienceCount} {t('labor.shifts')}
-                      </p>
-                    </div>
+                    <span style={{ flex: 1, fontSize: '10px', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.name}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRemoveWorker(line.id, worker.employeeId); }}
+                      style={{ 
+                        background: 'transparent', 
+                        border: 'none', 
+                        cursor: 'pointer', 
+                        padding: '2px',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#9ca3af',
+                        transition: 'color 0.15s, background 0.15s'
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = '#fef2f2'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <X size={10} />
+                    </button>
                   </div>
                 ))
               )}
@@ -231,9 +402,9 @@ export default function LaborScheduling() {
               ref={(el) => { buttonRefs.current[line.id] = el; }}
               onClick={() => handleAddWorkerClick(line.id)}
               className="btn btn-ghost" 
-              style={{ marginTop: '16px', width: '100%', border: '1px dashed #d1d5db', justifyContent: 'center', color: 'var(--text-secondary)' }}
+              style={{ marginTop: '10px', width: '100%', border: '1px dashed #d1d5db', justifyContent: 'center', color: 'var(--text-secondary)', padding: '6px 8px', fontSize: '11px' }}
             >
-              <Plus size={16} />
+              <Plus size={12} />
               {t('labor.addWorker')}
             </button>
           </div>
@@ -287,13 +458,29 @@ export default function LaborScheduling() {
             </div>
             {/* Employee List */}
             <div style={{ overflowY: 'auto', flex: 1 }}>
-              {availableEmployees
-                .filter(emp => 
-                  emp.name.toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
-                  emp.id.toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
-                  emp.role.toLowerCase().includes(workerSearchQuery.toLowerCase())
-                )
-                .map((employee) => (
+              {(() => {
+                // Get all assigned worker IDs across ALL lines (each person can only be assigned once)
+                const allAssignedIds = lines.flatMap(line => line.assignedWorkers.map(w => w.employeeId));
+                
+                const filteredEmployees = availableEmployees
+                  .filter(emp => !allAssignedIds.includes(emp.id)) // Exclude already assigned to any line
+                  .filter(emp => 
+                    emp.name.toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                    emp.id.toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                    emp.role.toLowerCase().includes(workerSearchQuery.toLowerCase())
+                  );
+                
+                if (filteredEmployees.length === 0) {
+                  return (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                      {allAssignedIds.length > 0 && availableEmployees.filter(emp => !allAssignedIds.includes(emp.id)).length === 0
+                        ? 'All employees are assigned'
+                        : 'No employees found'}
+                    </div>
+                  );
+                }
+                
+                return filteredEmployees.map((employee) => (
                   <div 
                     key={employee.id} 
                     onClick={() => handleSelectEmployee(employee)}
@@ -331,11 +518,12 @@ export default function LaborScheduling() {
                         {employee.role}
                       </p>
                     </div>
-    scm-history-item:c%3A%5CUsers%5Ccn8IsaLi%5COneDrive%20-%20LEGO%5CDesktop%5Cgit.workspace%5CLaborLink%5CLaborLink_App?%7B%22repositoryId%22%3A%22scm0%22%2C%22historyItemId%22%3A%222b2bbc604972784ec29efd12f30db2b6af8fd518%22%2C%22historyItemParentId%22%3A%22059abad157eb5d20101886cfa5431a2f727d603b%22%2C%22historyItemDisplayId%22%3A%222b2bbc6%22%7D                <span className={`badge ${getShiftClass(employee.shiftTeam)}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                    <span className={`badge ${getShiftClass(employee.shiftTeam)}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
                       {employee.shiftTeam}
                     </span>
                   </div>
-                ))}
+                ));
+              })()}
             </div>
           </div>
         </>
