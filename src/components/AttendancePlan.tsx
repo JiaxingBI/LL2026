@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Search } from 'lucide-react';
 import { mockEmployees, mockAdjustments } from '../data/mockData';
 import type { Employee, Adjustment } from '../types';
@@ -7,10 +7,57 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 export default function AttendancePlan() {
   const { t } = useLanguage();
-  const [employees] = useState<Employee[]>(mockEmployees);
+  const [employees, setEmployees] = useState<Employee[]>(mockEmployees);
   const [adjustments, setAdjustments] = useState<Adjustment[]>(mockAdjustments);
   const [selectedShift, setSelectedShift] = useState('All');
   const [filterNearDates, setFilterNearDates] = useState(true);
+
+  // Function to handle shift value changes and auto-add to adjustment table
+  const handleShiftChange = useCallback((emp: Employee, date: string, isNight: boolean, newValue: string) => {
+    // Update the employee's shift data
+    setEmployees(prevEmployees => 
+      prevEmployees.map(e => {
+        if (e.id === emp.id) {
+          const newShifts = { ...e.shifts };
+          if (!newShifts[date]) {
+            newShifts[date] = { day: '', night: '' };
+          }
+          if (isNight) {
+            newShifts[date] = { ...newShifts[date], night: newValue };
+          } else {
+            newShifts[date] = { ...newShifts[date], day: newValue };
+          }
+          return { ...e, shifts: newShifts };
+        }
+        return e;
+      })
+    );
+
+    // Auto-add adjustment record if value changed
+    if (newValue) {
+      const year = new Date().getFullYear();
+      const [month, day] = date.split('/').map(Number);
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      
+      const newAdjustment: Adjustment = {
+        id: Date.now().toString(),
+        employeeId: emp.id,
+        name: emp.name,
+        role: emp.role,
+        indirectDirect: emp.indirectDirect,
+        workStatus: emp.status,
+        shiftTeam: emp.shiftTeam,
+        gender: emp.gender,
+        date: dateStr,
+        isNight: isNight,
+        hours: parseInt(newValue) || 12,
+        reason: 'Overtime',
+        comments: ''
+      };
+      
+      setAdjustments(prev => [...prev, newAdjustment]);
+    }
+  }, []);
 
   // Generate all dates for the year (1/1 to 12/31)
   const allDates = useMemo(() => {
@@ -84,15 +131,15 @@ export default function AttendancePlan() {
   };
 
   return (
-    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', height: '100%' }}>
+    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', height: '100%', minHeight: 0 }}>
       {/* Header */}
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0' }}>{t('attendance.title')}</h1>
         <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{t('attendance.subtitle')}</p>
       </div>
 
       {/* Schedule Editor */}
-      <div className='card'>
+      <div className='card' style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
           <div className='flex items-center gap-4'>
             <div style={{ position: 'relative' }}>
@@ -169,7 +216,7 @@ export default function AttendancePlan() {
           </div>
         </div>
 
-        <div className='table-container' style={{ overflowX: 'auto' }}>
+        <div className='table-container' style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
           <table style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead>
               <tr>
@@ -262,6 +309,12 @@ export default function AttendancePlan() {
                         <input 
                           type='text' 
                           defaultValue={emp.shifts[date]?.day || ''} 
+                          onBlur={(e) => {
+                            const originalValue = emp.shifts[date]?.day || '';
+                            if (e.target.value !== originalValue) {
+                              handleShiftChange(emp, date, false, e.target.value);
+                            }
+                          }}
                           style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
                         />
                       </td>
@@ -269,6 +322,12 @@ export default function AttendancePlan() {
                         <input 
                           type='text' 
                           defaultValue={emp.shifts[date]?.night || ''} 
+                          onBlur={(e) => {
+                            const originalValue = emp.shifts[date]?.night || '';
+                            if (e.target.value !== originalValue) {
+                              handleShiftChange(emp, date, true, e.target.value);
+                            }
+                          }}
                           style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
                         />
                       </td>
@@ -283,7 +342,7 @@ export default function AttendancePlan() {
       </div>
 
       {/* Adjustment Table */}
-      <AdjustmentTable adjustments={adjustments} setAdjustments={setAdjustments} />
+      <AdjustmentTable adjustments={adjustments} setAdjustments={setAdjustments} selectedShift={selectedShift} />
     </div>
   );
 }

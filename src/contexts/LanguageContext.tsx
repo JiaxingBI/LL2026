@@ -61,8 +61,10 @@ const translations: Record<Language, Record<string, string>> = {
     'adjustment.leave': 'Leave',
     'adjustment.overtime': 'Overtime',
     'adjustment.transfer': 'Transfer',
+    'adjustment.edit': 'Edit',
     'adjustment.day': 'Day',
     'adjustment.night': 'Night',
+    'adjustment.dayNight': 'Day/Night',
     'adjustment.addNotes': 'Add notes...',
     'adjustment.durationPlaceholder': 'e.g. 2h',
     
@@ -152,8 +154,10 @@ const translations: Record<Language, Record<string, string>> = {
     'adjustment.leave': '请假',
     'adjustment.overtime': '加班',
     'adjustment.transfer': '调岗',
+    'adjustment.edit': '修改',
     'adjustment.day': '白班',
     'adjustment.night': '夜班',
+    'adjustment.dayNight': '白班/夜班',
     'adjustment.addNotes': '添加备注...',
     'adjustment.durationPlaceholder': '例如 2小时',
     
