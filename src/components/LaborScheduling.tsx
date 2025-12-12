@@ -1,11 +1,11 @@
 import { useState, useRef, useMemo } from 'react';
-import { Users, Plus, MessageSquare, Info, Trash2, ChevronDown, Search, X } from 'lucide-react';
+import { Users, Plus, MessageSquare, Trash2, ChevronDown, Search, X, MessageCircle } from 'lucide-react';
 import { mockAssemblyLines, mockEmployees } from '../data/mockData';
 import type { AssemblyLine, Employee } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export default function LaborScheduling() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [lines, setLines] = useState<AssemblyLine[]>(mockAssemblyLines);
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [showAddWorkerDropdown, setShowAddWorkerDropdown] = useState(false);
@@ -17,14 +17,18 @@ export default function LaborScheduling() {
     for (let i = 0; i < 7; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() + i);
-      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const dateStr = language === 'zh' 
+        ? `${date.getMonth() + 1}月${date.getDate()}日`
+        : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dayLabel = language === 'zh' ? '白班' : 'Day';
+      const nightLabel = language === 'zh' ? '夜班' : 'Night';
       options.push(
-        { value: `${date.toISOString().split('T')[0]}-day`, label: `${dateStr} - Day Shift` },
-        { value: `${date.toISOString().split('T')[0]}-night`, label: `${dateStr} - Night Shift` }
+        { value: `${date.toISOString().split('T')[0]}-day`, label: `${dateStr} - ${dayLabel}` },
+        { value: `${date.toISOString().split('T')[0]}-night`, label: `${dateStr} - ${nightLabel}` }
       );
     }
     return options;
-  }, []);
+  }, [language]);
 
   // Set default shift to today's day shift
   useState(() => {
@@ -33,14 +37,46 @@ export default function LaborScheduling() {
     }
   });
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
-  const [availableEmployees] = useState<Employee[]>(mockEmployees);
   const [workerSearchQuery, setWorkerSearchQuery] = useState('');
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number; openUpward: boolean } | null>(null);
   const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   
+  // Filter employees based on selected date/shift - only show those with attendance
+  const availableEmployees = useMemo(() => {
+    if (!selectedShift) return mockEmployees;
+    
+    const [dateStr, shiftType] = selectedShift.split('-').length > 3 
+      ? [selectedShift.substring(0, 10), selectedShift.substring(11)]
+      : selectedShift.split('-').slice(0, 3).join('-').split('-').slice(0, 3).join('-') === selectedShift.substring(0, 10)
+        ? [selectedShift.substring(0, 10), selectedShift.split('-').pop() || '']
+        : ['', ''];
+    
+    // Parse the date to get month-day format for shifts lookup
+    const date = new Date(dateStr);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const shiftKey = `${month}/${day}`;
+    const isNight = shiftType === 'night';
+    
+    return mockEmployees.filter(employee => {
+      const shiftEntry = employee.shifts[shiftKey];
+      if (!shiftEntry) return false;
+      
+      // Check if the employee has a numeric value (hours) for the selected shift
+      const shiftValue = isNight ? shiftEntry.night : shiftEntry.day;
+      const numValue = parseFloat(shiftValue);
+      return !isNaN(numValue) && numValue > 0;
+    });
+  }, [selectedShift]);
+  
   // Drag and drop state
   const [draggedWorker, setDraggedWorker] = useState<{ employeeId: string; fromLineId: string; name: string; initials: string; experienceCount: number } | null>(null);
   const [dragOverLineId, setDragOverLineId] = useState<string | null>(null);
+  
+  // Comment tooltip state
+  const [hoveredLineId, setHoveredLineId] = useState<string | null>(null);
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [editingComment, setEditingComment] = useState<string>('');
 
   const handleAddWorkerClick = (lineId: string) => {
     const button = buttonRefs.current[lineId];
@@ -314,15 +350,139 @@ export default function LaborScheduling() {
               height: '100%',
               border: dragOverLineId === line.id ? '2px solid var(--accent-blue)' : undefined,
               background: dragOverLineId === line.id ? '#f0f7ff' : undefined,
-              transition: 'border 0.15s, background 0.15s'
+              transition: 'border 0.15s, background 0.15s',
+              overflow: 'visible',
+              position: 'relative'
             }}
             onDragOver={(e) => handleDragOver(e, line.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, line.id)}
           >
-            <div className="flex justify-between" style={{ alignItems: 'flex-start', marginBottom: '10px' }}>
-              <h3 style={{ fontWeight: 'bold', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', margin: 0, lineHeight: '1.2' }}>{line.name}</h3>
-              <Info size={12} color="#d1d5db" style={{ cursor: 'pointer', flexShrink: 0 }} />
+            <div 
+              className="flex justify-between line-card-header" 
+              style={{ alignItems: 'flex-start', marginBottom: '10px', position: 'relative' }}
+            >
+              <div style={{ flex: 1 }}>
+                <h3 style={{ fontWeight: 'bold', fontSize: '13px', margin: 0, lineHeight: '1.3', color: '#1f2937' }}>{line.id}</h3>
+                <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '2px 0 0 0', lineHeight: '1.3' }}>
+                  {line.name.replace(`${line.id}-`, '').replace(`${line.id} - `, '')}
+                </p>
+              </div>
+              <div 
+                style={{ position: 'relative' }}
+                onMouseEnter={() => !editingLineId && setHoveredLineId(line.id)}
+                onMouseLeave={() => !editingLineId && setHoveredLineId(null)}
+              >
+                <MessageCircle 
+                  size={14} 
+                  style={{ 
+                    cursor: 'pointer', 
+                    flexShrink: 0,
+                    color: line.comment ? 'var(--accent-blue)' : '#d1d5db',
+                    transition: 'color 0.2s'
+                  }} 
+                  onClick={() => {
+                    setEditingLineId(line.id);
+                    setEditingComment(line.comment || '');
+                    setHoveredLineId(null);
+                  }}
+                />
+                {/* Hover Tooltip */}
+                {hoveredLineId === line.id && !editingLineId && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: '4px',
+                    padding: '8px 12px',
+                    background: 'white',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    fontSize: '12px',
+                    color: 'var(--text-secondary)',
+                    whiteSpace: 'nowrap',
+                    zIndex: 9999,
+                    minWidth: '120px'
+                  }}>
+                    {line.comment || 'No comment. Click to add.'}
+                  </div>
+                )}
+                {/* Edit Mode */}
+                {editingLineId === line.id && (
+                  <div 
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      right: 0,
+                      marginTop: '4px',
+                      padding: '8px',
+                      background: 'white',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                      zIndex: 9999,
+                      minWidth: '180px'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <textarea
+                      value={editingComment}
+                      onChange={(e) => setEditingComment(e.target.value)}
+                      placeholder="Add a comment..."
+                      autoFocus
+                      style={{
+                        width: '100%',
+                        minHeight: '60px',
+                        padding: '6px 8px',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        resize: 'vertical',
+                        fontFamily: 'inherit'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => {
+                          setEditingLineId(null);
+                          setEditingComment('');
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '4px',
+                          background: 'white',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          setLines(prev => prev.map(l => 
+                            l.id === line.id ? { ...l, comment: editingComment } : l
+                          ));
+                          setEditingLineId(null);
+                          setEditingComment('');
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          background: 'var(--accent-blue)',
+                          color: 'white',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ marginBottom: '12px' }}>

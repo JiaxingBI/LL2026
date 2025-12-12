@@ -84,6 +84,9 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.selectDate': 'Select Date',
     'labor.selectWorker': 'Select Employee to Add',
     'labor.close': 'Close',
+    'labor.dayShift': 'Day Shift',
+    'labor.nightShift': 'Night Shift',
+    'labor.selectDateShift': 'Select Date & Shift',
     
     // Employee View
     'employee.title': 'Employee Kiosk',
@@ -180,6 +183,9 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.selectDate': '选择日期',
     'labor.selectWorker': '选择要添加的员工',
     'labor.close': '关闭',
+    'labor.dayShift': '白班',
+    'labor.nightShift': '夜班',
+    'labor.selectDateShift': '选择日期和班次',
     
     // Employee View
     'employee.title': '员工自助终端',

@@ -48,6 +48,7 @@ export interface AssemblyLine {
   capacity: number;
   currentWorkers: number;
   assignedWorkers: WorkerAssignment[];
+  comment?: string;
 }
 
 export interface WorkerAssignment {
