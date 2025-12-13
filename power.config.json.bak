@@ -1,0 +1,30 @@
+{
+  "appId": "27fdf297-51f5-41da-8dc7-e0201e74d883",
+  "appDisplayName": "LaborLink",
+  "description": null,
+  "environmentId": "2f748ff5-5b97-e180-a132-e3fe17813019",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "logoPath": "Default",
+  "localAppUrl": "http://localhost:3001/",
+  "connectionReferences": {
+    "807e50d0-abf6-4514-b003-d8473b378072": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_office365users",
+      "displayName": "Office 365 Users",
+      "dataSources": [
+        "office365users"
+      ],
+      "dataSets": {}
+    },
+    "5b85a365-fb31-4f52-a8dd-9fe516e45154": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+      "displayName": "SharePoint",
+      "dataSources": [
+        "sharepointonline"
+      ],
+      "dataSets": {}
+    }
+  },
+  "databaseReferences": {},
+  "region": "prod"
+}

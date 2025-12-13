@@ -21,6 +21,8 @@ export interface Employee {
   shifts: Record<string, ShiftEntry>;
 }
 
+export type PlanAdjustmentType = 'Overtime' | 'Leave';
+
 export interface Adjustment {
   id: string;
   employeeId: string;
@@ -29,9 +31,11 @@ export interface Adjustment {
   shiftTeam?: string;
   gender?: string;
   hours: number;
+  originalHours?: number;  // Hours before adjustment
   date: string;
   isNight?: boolean;
   reason: string;
+  adjustmentType?: PlanAdjustmentType;  // Overtime or Leave
   comments: string;
   // New fields from reference
   type?: string;
@@ -56,4 +60,76 @@ export interface WorkerAssignment {
   name: string;
   initials: string;
   experienceCount: number; // Number of shifts on this line
+}
+
+// Attendance Data Types
+export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Off' | 'Leave';
+export type AdjustmentType = 'Overtime' | 'Late Arrival' | 'Early Leave' | 'Sick Leave' | 'Vacation' | 'Other';
+
+export interface AttendanceRecord {
+  recordId: string;
+  date: string;  // ISO format: YYYY-MM-DD
+  employeeId: string;
+  name: string;
+  role: string;
+  indirectDirect: 'Direct' | 'Indirect';
+  workStatus: WorkStatus;
+  shiftTeam: ShiftTeam;
+  shiftType: 'Day' | 'Night' | 'Rest';
+  workingHours: number;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  overtimeHours: number;
+  attendanceStatus: AttendanceStatus;
+  notes: string;
+}
+
+export interface AttendanceAdjustment {
+  adjustmentId: string;
+  date: string;
+  employeeId: string;
+  name: string;
+  role: string;
+  indirectDirect: 'Direct' | 'Indirect';
+  workStatus: WorkStatus;
+  shiftTeam: ShiftTeam;
+  shiftType: 'Day' | 'Night' | 'Rest';
+  adjustmentType: AdjustmentType;
+  originalHours: number;
+  adjustedHours: number;
+  reason: string;
+  approvedBy: string;
+  comments: string;
+}
+
+export interface ShiftScheduleConfig {
+  dayShiftStart: string;
+  dayShiftEnd: string;
+  nightShiftStart: string;
+  nightShiftEnd: string;
+  standardShiftHours: number;
+  rotationCycle: number;
+  workDaysPerCycle: number;
+  restDaysPerCycle: number;
+  shiftTeamOffsets: Record<string, number>;
+}
+
+export interface AttendanceDataSource {
+  metadata: {
+    version: string;
+    lastUpdated: string;
+    description: string;
+  };
+  employees: Array<{
+    id: string;
+    name: string;
+    role: string;
+    indirectDirect: 'Direct' | 'Indirect';
+    workStatus: WorkStatus;
+    shiftTeam: ShiftTeam;
+    gender: 'Male' | 'Female';
+  }>;
+  attendanceRecords: AttendanceRecord[];
+  adjustments: AttendanceAdjustment[];
+  shiftScheduleConfig: ShiftScheduleConfig;
 }

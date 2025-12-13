@@ -1,0 +1,76 @@
+date,employeeId,name,role,indirectDirect,workStatus,shiftTeam,shiftType,workingHours,checkInTime,checkOutTime,notes
+2025-12-12,EMP001,Alex,TC.L1,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-12,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-12,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-12,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-12,EMP005,Eric,Infeeder,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-12,EMP006,Frank,Sr.Infeeder,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-12,EMP007,George,Ops.L1,Indirect,DailyProduction,Orange,Rest,0,,,Scheduled rest day
+2025-12-12,EMP008,Helen,TC.L1,Direct,Prod.,Yellow,Rest,0,,,Scheduled rest day
+2025-12-12,EMP009,Ivan,TC.L2,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-12,EMP010,Julia,Infeeder,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP001,Alex,TC.L1,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-13,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-13,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-13,EMP005,Eric,Infeeder,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-13,EMP006,Frank,Sr.Infeeder,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP007,George,Ops.L1,Indirect,DailyProduction,Orange,Rest,0,,,Scheduled rest day
+2025-12-13,EMP008,Helen,TC.L1,Direct,Prod.,Yellow,Rest,0,,,Scheduled rest day
+2025-12-13,EMP009,Ivan,TC.L2,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-13,EMP010,Julia,Infeeder,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP011,Kevin,Sr.Infeeder,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-13,EMP012,Lisa,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-13,EMP013,Mike,TC.L3,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-13,EMP014,Nancy,Ops.L1,Indirect,DailyProduction,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP015,Oscar,TC.L1,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-13,EMP016,Patricia,TC.L2,Direct,Prod.,Yellow,Rest,0,,,Scheduled rest day
+2025-12-13,EMP017,Quinn,Infeeder,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-13,EMP018,Rachel,Sr.Infeeder,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP019,Steve,TC.L3,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-13,EMP020,Tina,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-13,EMP021,Victor,Ops.L1,Indirect,DailyProduction,Green,Day,12,06:00,18:00,
+2025-12-13,EMP022,Wendy,TC.L1,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-13,EMP023,Xavier,TC.L2,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-13,EMP024,Yolanda,Infeeder,Direct,Prod.,Yellow,Rest,0,,,Scheduled rest day
+2025-12-13,EMP025,Zack,Sr.Infeeder,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-14,EMP001,Alex,TC.L1,Direct,Prod.,Green,Night,12,18:00,06:00,
+2025-12-14,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Rest,0,,,Scheduled rest day
+2025-12-14,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Day,12,06:00,18:00,
+2025-12-14,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Night,12,18:00,06:00,
+2025-12-14,EMP005,Eric,Infeeder,Direct,Prod.,Green,Night,12,18:00,06:00,
+2025-12-14,EMP006,Frank,Sr.Infeeder,Direct,Prod.,Blue,Rest,0,,,Scheduled rest day
+2025-12-14,EMP007,George,Ops.L1,Indirect,DailyProduction,Orange,Day,12,06:00,18:00,
+2025-12-14,EMP008,Helen,TC.L1,Direct,Prod.,Yellow,Night,12,18:00,06:00,
+2025-12-14,EMP009,Ivan,TC.L2,Direct,Prod.,Green,Night,12,18:00,06:00,
+2025-12-14,EMP010,Julia,Infeeder,Direct,Prod.,Blue,Rest,0,,,Scheduled rest day
+2025-12-15,EMP001,Alex,TC.L1,Direct,Prod.,Green,Night,12,18:00,06:00,
+2025-12-15,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Rest,0,,,Scheduled rest day
+2025-12-15,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Day,12,06:00,18:00,
+2025-12-15,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Night,12,18:00,06:00,
+2025-12-15,EMP005,Eric,Infeeder,Direct,Prod.,Green,Night,12,18:00,06:00,
+2025-12-16,EMP001,Alex,TC.L1,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-16,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Day,12,06:00,18:00,
+2025-12-16,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Night,12,18:00,06:00,
+2025-12-16,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-16,EMP005,Eric,Infeeder,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-17,EMP001,Alex,TC.L1,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-17,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Day,12,06:00,18:00,
+2025-12-17,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Night,12,18:00,06:00,
+2025-12-17,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-17,EMP005,Eric,Infeeder,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-18,EMP001,Alex,TC.L1,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-18,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-18,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-18,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Day,12,06:00,18:00,
+2025-12-18,EMP005,Eric,Infeeder,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-19,EMP001,Alex,TC.L1,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-19,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Night,12,18:00,06:00,
+2025-12-19,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Rest,0,,,Scheduled rest day
+2025-12-19,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Day,12,06:00,18:00,
+2025-12-19,EMP005,Eric,Infeeder,Direct,Prod.,Green,Rest,0,,,Scheduled rest day
+2025-12-20,EMP001,Alex,TC.L1,Direct,Prod.,Green,Day,12,06:00,18:00,
+2025-12-20,EMP002,Ben,TC.L2,Direct,Prod.,Blue,Rest,0,,,Scheduled rest day
+2025-12-20,EMP003,Charles,TC.L3,Direct,Prod.,Orange,Night,12,18:00,06:00,
+2025-12-20,EMP004,Daniels,Hall Asist,Indirect,Jail,Yellow,Rest,0,,,Scheduled rest day
+2025-12-20,EMP005,Eric,Infeeder,Direct,Prod.,Green,Day,12,06:00,18:00,

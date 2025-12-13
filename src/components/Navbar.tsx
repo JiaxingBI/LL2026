@@ -1,4 +1,4 @@
-import { Calendar, LayoutDashboard, User, Globe } from 'lucide-react';
+import { Calendar, LayoutDashboard, User, Globe, FlaskConical } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface NavbarProps {
@@ -13,6 +13,7 @@ export default function Navbar({ activeTab, onTabChange }: NavbarProps) {
     { id: 'attendance', label: t('nav.attendance'), icon: Calendar },
     { id: 'assembly', label: t('nav.assembly'), icon: LayoutDashboard },
     { id: 'employee', label: t('nav.employee'), icon: User },
+    { id: 'test', label: t('nav.test') || 'Test', icon: FlaskConical },
   ];
 
   const toggleLanguage = () => {

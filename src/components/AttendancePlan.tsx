@@ -48,6 +48,12 @@ export default function AttendancePlan() {
 
   // Function to handle shift value changes and auto-add to adjustment table
   const handleShiftChange = useCallback((emp: Employee, date: string, isNight: boolean, newValue: string) => {
+    // Get the original value before the change
+    const originalShift = emp.shifts[date];
+    const originalValue = isNight ? (originalShift?.night || '') : (originalShift?.day || '');
+    const originalHours = parseInt(originalValue) || 0;
+    const newHours = parseInt(newValue) || 0;
+
     // Update the employee's shift data
     setEmployees(prevEmployees => 
       prevEmployees.map(e => {
@@ -67,8 +73,28 @@ export default function AttendancePlan() {
       })
     );
 
-    // Auto-add adjustment record if value changed
-    if (newValue) {
+    // Determine adjustment type:
+    // - Overtime: Adding hours to a blank cell (originalHours = 0, newHours > 0)
+    // - Leave: Reducing or clearing existing hours (originalHours > 0, newHours < originalHours)
+    let adjustmentType: 'Overtime' | 'Leave' | null = null;
+    let reason = '';
+
+    if (originalHours === 0 && newHours > 0) {
+      // Adding hours to blank = Overtime
+      adjustmentType = 'Overtime';
+      reason = 'Work Overtime';
+    } else if (originalHours > 0 && newHours < originalHours) {
+      // Reducing or clearing hours = Leave
+      adjustmentType = 'Leave';
+      reason = newHours === 0 ? 'Full Day Leave' : 'Partial Leave';
+    } else if (originalHours > 0 && newHours > originalHours) {
+      // Increasing existing hours = also Overtime
+      adjustmentType = 'Overtime';
+      reason = 'Extended Shift';
+    }
+
+    // Auto-add adjustment record if there's a meaningful change
+    if (adjustmentType) {
       const year = new Date().getFullYear();
       const [month, day] = date.split('/').map(Number);
       const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -84,8 +110,10 @@ export default function AttendancePlan() {
         gender: emp.gender,
         date: dateStr,
         isNight: isNight,
-        hours: parseInt(newValue) || 12,
-        reason: 'Overtime',
+        originalHours: originalHours,
+        hours: newHours,
+        adjustmentType: adjustmentType,
+        reason: reason,
         comments: ''
       };
       

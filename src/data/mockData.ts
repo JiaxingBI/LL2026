@@ -1,5 +1,23 @@
 import type { Employee, Adjustment, AssemblyLine, ShiftEntry } from '../types';
 
+// Re-export attendance data utilities for convenience
+export { 
+  attendanceData,
+  getAttendanceRecords,
+  getAttendanceByDate,
+  getAttendanceByEmployee,
+  getAttendanceByShiftTeam,
+  getAttendanceByShiftType,
+  getAdjustments,
+  getAdjustmentsByDate,
+  getAdjustmentsByEmployee,
+  getShiftScheduleConfig,
+  convertToEmployeeFormat,
+  formatDateForDisplay,
+  formatDateToISO,
+  getAttendanceSummary
+} from './attendanceDataLoader';
+
 // Shift rotation: 4 days work (2 Day + 2 Night), 4 days rest
 // Each shift team starts at a different point in the 8-day cycle
 
