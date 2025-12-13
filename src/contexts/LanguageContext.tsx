@@ -32,7 +32,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.gender': 'Gender',
     'attendance.day': 'DAY',
     'attendance.night': 'NIGHT',
-    'attendance.nearDatesFilter': 'Show nearby dates only (-4 to +12 days)',
+    'attendance.nearDatesFilter': 'Show nearby dates only (-1 to +12 days)',
     
     // Filters
     'filter.all': 'All',
@@ -131,7 +131,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.gender': '性别',
     'attendance.day': '白班',
     'attendance.night': '夜班',
-    'attendance.nearDatesFilter': '仅显示附近日期（-4至+12天）',
+    'attendance.nearDatesFilter': '仅显示附近日期（-1至+12天）',
     
     // Filters
     'filter.all': '全部',

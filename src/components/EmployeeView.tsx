@@ -1,64 +1,73 @@
-import { useState } from 'react';
-import { Scan, Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ArrowLeft } from 'lucide-react';
-import LaborScheduling from './LaborScheduling'; // Reuse the board for the background
-import { mockEmployees } from '../data/mockData';
-import type { Employee } from '../types';
+import { useState, useMemo } from 'react';
+import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ChevronDown, MessageCircle } from 'lucide-react';
+import { mockAssemblyLines, mockEmployees } from '../data/mockData';
+import type { Employee, AssemblyLine } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
-interface EmployeeViewProps {
-  onBack?: () => void;
-}
-
-export default function EmployeeView({ onBack }: EmployeeViewProps) {
-  const { t } = useLanguage();
+export default function EmployeeView() {
+  const { t, language } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [lines] = useState<AssemblyLine[]>(mockAssemblyLines);
+  const [selectedShift, setSelectedShift] = useState<string>('');
+  const [highlightedEmployeeId, setHighlightedEmployeeId] = useState<string | null>(null);
+
+  // Generate shift options for the next 7 days
+  const shiftOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      const dateStr = language === 'zh' 
+        ? `${date.getMonth() + 1}月${date.getDate()}日`
+        : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dayLabel = language === 'zh' ? '白班' : 'Day';
+      const nightLabel = language === 'zh' ? '夜班' : 'Night';
+      options.push(
+        { value: `${date.toISOString().split('T')[0]}-day`, label: `${dateStr} - ${dayLabel}` },
+        { value: `${date.toISOString().split('T')[0]}-night`, label: `${dateStr} - ${nightLabel}` }
+      );
+    }
+    return options;
+  }, [language]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const employee = mockEmployees.find(emp => 
-      emp.name.toLowerCase() === searchQuery.toLowerCase() || 
+      emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       emp.id === searchQuery
     );
     
     if (employee) {
       setSelectedEmployee(employee);
-      setSearchQuery('');
+      setHighlightedEmployeeId(employee.id);
+      // Don't clear search query so user can see what they searched
     } else {
       alert(t('employee.notFound'));
     }
   };
 
+  const getCapacityColor = (current: number, capacity: number) => {
+    if (current > capacity) return 'var(--danger)';
+    if (current === capacity) return 'var(--success)';
+    return 'var(--warning)';
+  };
+
+  const getCapacityText = (current: number, capacity: number) => {
+    if (current > capacity) return 'var(--danger)';
+    if (current === capacity) return 'var(--success)';
+    return 'var(--warning)';
+  };
+
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh', height: '100%', background: '#F5F5F7' }}>
-      {/* Top Header - Scan Bar */}
-      <div style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '20px 24px', position: 'sticky', top: 0, zIndex: 40, boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' }}>
-        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-          {/* Back Button & Title Row */}
-          <div className="flex items-center justify-between" style={{ marginBottom: '16px' }}>
-            <div className="flex items-center gap-3">
-              {onBack && (
-                <button 
-                  onClick={onBack}
-                  className="btn btn-ghost"
-                  style={{ padding: '8px', borderRadius: '8px' }}
-                >
-                  <ArrowLeft size={20} />
-                </button>
-              )}
-              <div style={{ padding: '10px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', borderRadius: '10px', boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)' }}>
-                <Scan size={28} color="white" />
-              </div>
-              <div>
-                <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#111827', margin: 0, letterSpacing: '-0.5px' }}>{t('employee.title')}</h1>
-                <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>{t('employee.subtitle')}</p>
-              </div>
-            </div>
-          </div>
-          
+      {/* Top Header - Search Bar */}
+      <div style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '16px 24px', position: 'sticky', top: 0, zIndex: 40, boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           {/* Search Bar */}
-          <form onSubmit={handleSearch} style={{ position: 'relative' }}>
-            <Search size={20} color="#9ca3af" style={{ position: 'absolute', left: '18px', top: '50%', transform: 'translateY(-50%)', zIndex: 1 }} />
+          <form onSubmit={handleSearch} style={{ position: 'relative', flex: 1, minWidth: '250px' }}>
+            <Search size={18} color="#9ca3af" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', zIndex: 1 }} />
             <input 
               type="text" 
               value={searchQuery}
@@ -67,40 +76,160 @@ export default function EmployeeView({ onBack }: EmployeeViewProps) {
               className="input"
               style={{ 
                 width: '100%', 
-                paddingLeft: '52px', 
-                paddingRight: '16px', 
-                paddingTop: '14px', 
-                paddingBottom: '14px', 
-                fontSize: '16px', 
-                borderRadius: '12px',
-                border: '2px solid #e5e7eb',
-                transition: 'all 0.2s'
+                paddingLeft: '42px', 
+                paddingRight: '100px', 
+                paddingTop: '10px', 
+                paddingBottom: '10px', 
+                fontSize: '14px', 
+                borderRadius: '8px',
+                border: '1px solid #e5e7eb'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
-              onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
-              autoFocus
             />
             <button 
               type="submit" 
               className="btn btn-primary"
               style={{ 
                 position: 'absolute', 
-                right: '6px', 
+                right: '4px', 
                 top: '50%', 
                 transform: 'translateY(-50%)',
-                padding: '8px 20px',
-                fontSize: '14px'
+                padding: '6px 16px',
+                fontSize: '13px'
               }}
             >
               {t('employee.search')}
             </button>
           </form>
+
+          {/* Shift Selector */}
+          <div style={{ position: 'relative' }}>
+            <select
+              value={selectedShift}
+              onChange={(e) => setSelectedShift(e.target.value)}
+              style={{ 
+                padding: '10px 36px 10px 12px', 
+                border: '1px solid var(--border-color)', 
+                borderRadius: '8px', 
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                appearance: 'none',
+                background: 'white',
+                minWidth: '180px'
+              }}
+            >
+              {shiftOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} />
+          </div>
         </div>
       </div>
 
       {/* Main Content - Read-only Board */}
-      <div style={{ opacity: 0.5, pointerEvents: 'none', filter: 'blur(1px)' }}>
-        <LaborScheduling />
+      <div className="container" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Assembly Lines Grid - Read Only */}
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', 
+          gap: '12px',
+          width: '100%'
+        }}>
+          {lines.map((line) => (
+            <div 
+              key={line.id} 
+              className="card" 
+              style={{ 
+                padding: '12px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                height: '100%',
+                transition: 'border 0.15s, background 0.15s'
+              }}
+            >
+              <div 
+                className="flex justify-between" 
+                style={{ alignItems: 'flex-start', marginBottom: '10px', position: 'relative' }}
+              >
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ fontWeight: 'bold', fontSize: '13px', margin: 0, lineHeight: '1.3', color: '#1f2937' }}>{line.id}</h3>
+                  <p style={{ fontSize: '10px', color: 'var(--text-secondary)', margin: '2px 0 0 0', lineHeight: '1.3' }}>
+                    {line.name.replace(`${line.id}-`, '').replace(`${line.id} - `, '')}
+                  </p>
+                </div>
+                {line.comment && (
+                  <MessageCircle 
+                    size={14} 
+                    style={{ 
+                      flexShrink: 0,
+                      color: 'var(--accent-blue)'
+                    }} 
+                  />
+                )}
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <div className="flex justify-between" style={{ fontSize: '10px', fontWeight: '500', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>{t('labor.capacity')}</span>
+                  <span style={{ color: getCapacityText(line.currentWorkers, line.capacity) }}>
+                    {line.currentWorkers} <span style={{ color: '#d1d5db' }}>/</span> {line.capacity}
+                  </span>
+                </div>
+                <div style={{ width: '100%', background: '#f3f4f6', borderRadius: '999px', height: '4px' }}>
+                  <div 
+                    style={{ 
+                      height: '4px', 
+                      borderRadius: '999px', 
+                      transition: 'all 0.5s',
+                      background: getCapacityColor(line.currentWorkers, line.capacity),
+                      width: `${Math.min((line.currentWorkers / line.capacity) * 100, 100)}%` 
+                    }} 
+                  ></div>
+                </div>
+              </div>
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {line.assignedWorkers.length === 0 ? (
+                  <div style={{ height: '40px', border: '2px dashed #f3f4f6', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+                    <span style={{ fontSize: '10px' }}>{t('labor.noWorkers')}</span>
+                  </div>
+                ) : (
+                  line.assignedWorkers.map((worker) => (
+                    <div 
+                      key={worker.employeeId} 
+                      onClick={() => {
+                        const emp = mockEmployees.find(e => e.id === worker.employeeId);
+                        if (emp) {
+                          setSelectedEmployee(emp);
+                          setHighlightedEmployeeId(emp.id);
+                        }
+                      }}
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '6px', 
+                        padding: '4px 6px', 
+                        background: highlightedEmployeeId === worker.employeeId ? '#dbeafe' : '#f9fafb', 
+                        borderRadius: '4px', 
+                        border: highlightedEmployeeId === worker.employeeId ? '1px solid #3b82f6' : '1px solid #f3f4f6',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s, border 0.15s'
+                      }}
+                    >
+                      <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 'bold', color: '#4b5563', flexShrink: 0 }}>
+                        {worker.initials}
+                      </div>
+                      <span style={{ flex: 1, fontSize: '10px', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.name}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Interactive Modal */}

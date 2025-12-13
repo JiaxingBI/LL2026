@@ -11,6 +11,7 @@ export default function AttendancePlan() {
   const [adjustments, setAdjustments] = useState<Adjustment[]>(mockAdjustments);
   const [selectedShift, setSelectedShift] = useState('All');
   const [filterNearDates, setFilterNearDates] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Function to handle shift value changes and auto-add to adjustment table
   const handleShiftChange = useCallback((emp: Employee, date: string, isNight: boolean, newValue: string) => {
@@ -72,14 +73,14 @@ export default function AttendancePlan() {
     return dates;
   }, []);
 
-  // Filter dates: today - 4 to today + 12
+  // Filter dates: today - 1 to today + 12
   const filteredDates = useMemo(() => {
     if (!filterNearDates) return allDates;
     
     const today = new Date();
     const year = today.getFullYear();
     
-    const startDate = new Date(year, today.getMonth(), today.getDate() - 4);
+    const startDate = new Date(year, today.getMonth(), today.getDate() - 1);
     const endDate = new Date(year, today.getMonth(), today.getDate() + 12);
     
     return allDates.filter(dateStr => {
@@ -106,9 +107,25 @@ export default function AttendancePlan() {
     'Yellow': 'filter.yellow'
   };
 
-  const filteredEmployees = selectedShift === 'All' 
-    ? employees 
-    : employees.filter(emp => emp.shiftTeam === selectedShift);
+  const filteredEmployees = useMemo(() => {
+    let result = employees;
+    
+    // Filter by shift team
+    if (selectedShift !== 'All') {
+      result = result.filter(emp => emp.shiftTeam === selectedShift);
+    }
+    
+    // Filter by search query (name or ID)
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      result = result.filter(emp => 
+        emp.name.toLowerCase().includes(query) ||
+        emp.id.toLowerCase().includes(query)
+      );
+    }
+    
+    return result;
+  }, [employees, selectedShift, searchQuery]);
 
   const getShiftClass = (team: string) => {
     switch (team) {
@@ -146,6 +163,8 @@ export default function AttendancePlan() {
               <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
               <input 
                 type='text' 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('attendance.search')} 
                 className='input'
                 style={{ paddingLeft: '36px', width: '250px' }}
