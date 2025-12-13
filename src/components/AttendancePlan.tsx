@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Check, RotateCcw } from 'lucide-react';
 import { mockEmployees, mockAdjustments } from '../data/mockData';
 import type { Employee, Adjustment } from '../types';
 import AdjustmentTable from './AdjustmentTable';
@@ -11,7 +11,40 @@ export default function AttendancePlan() {
   const [adjustments, setAdjustments] = useState<Adjustment[]>(mockAdjustments);
   const [selectedShift, setSelectedShift] = useState('All');
   const [filterNearDates, setFilterNearDates] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');  
+  
+  // Track saved state - filter uses this, display uses 'employees' with pending changes
+  const [savedEmployees, setSavedEmployees] = useState<Employee[]>(JSON.parse(JSON.stringify(mockEmployees)));
+  const [savedAdjustments, setSavedAdjustments] = useState<Adjustment[]>(JSON.parse(JSON.stringify(mockAdjustments)));
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Confirm changes - save current state as new baseline
+  const handleConfirm = useCallback(() => {
+    setSavedEmployees(JSON.parse(JSON.stringify(employees)));
+    setSavedAdjustments(JSON.parse(JSON.stringify(adjustments)));
+    setHasChanges(false);
+    alert(t('attendance.changesSaved') || 'Changes saved successfully!');
+  }, [employees, adjustments, t]);
+
+  // Reset to saved state
+  const handleReset = useCallback(() => {
+    setEmployees(JSON.parse(JSON.stringify(savedEmployees)));
+    setAdjustments(JSON.parse(JSON.stringify(savedAdjustments)));
+    setHasChanges(false);
+  }, [savedEmployees, savedAdjustments]);
+
+  // Function to handle employee field changes
+  const handleEmployeeUpdate = useCallback((empId: string, field: keyof Employee, value: string) => {
+    setEmployees(prevEmployees => 
+      prevEmployees.map(e => {
+        if (e.id === empId) {
+          return { ...e, [field]: value };
+        }
+        return e;
+      })
+    );
+    setHasChanges(true);
+  }, []);
 
   // Function to handle shift value changes and auto-add to adjustment table
   const handleShiftChange = useCallback((emp: Employee, date: string, isNight: boolean, newValue: string) => {
@@ -58,6 +91,7 @@ export default function AttendancePlan() {
       
       setAdjustments(prev => [...prev, newAdjustment]);
     }
+    setHasChanges(true);
   }, []);
 
   // Generate all dates for the year (1/1 to 12/31)
@@ -108,24 +142,29 @@ export default function AttendancePlan() {
   };
 
   const filteredEmployees = useMemo(() => {
-    let result = employees;
+    // Get the IDs of employees that match the filter based on SAVED data
+    const matchingIds = new Set(
+      savedEmployees
+        .filter(emp => {
+          // Filter by shift team using SAVED shiftTeam
+          if (selectedShift !== 'All' && emp.shiftTeam !== selectedShift) {
+            return false;
+          }
+          // Filter by search query (name or ID)
+          if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase().trim();
+            if (!emp.name.toLowerCase().includes(query) && !emp.id.toLowerCase().includes(query)) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .map(emp => emp.id)
+    );
     
-    // Filter by shift team
-    if (selectedShift !== 'All') {
-      result = result.filter(emp => emp.shiftTeam === selectedShift);
-    }
-    
-    // Filter by search query (name or ID)
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      result = result.filter(emp => 
-        emp.name.toLowerCase().includes(query) ||
-        emp.id.toLowerCase().includes(query)
-      );
-    }
-    
-    return result;
-  }, [employees, selectedShift, searchQuery]);
+    // Return employees (with pending changes) that match the filter
+    return employees.filter(emp => matchingIds.has(emp.id));
+  }, [employees, savedEmployees, selectedShift, searchQuery]);
 
   const getShiftClass = (team: string) => {
     switch (team) {
@@ -233,6 +272,51 @@ export default function AttendancePlan() {
               </span>
             </div>
           </div>
+          {/* Confirm and Reset Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={handleReset}
+              disabled={!hasChanges}
+              className='btn'
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                fontSize: '14px',
+                backgroundColor: hasChanges ? '#fff3e0' : '#f5f5f5',
+                color: hasChanges ? '#e65100' : '#999',
+                border: `1px solid ${hasChanges ? '#ffcc80' : '#e0e0e0'}`,
+                cursor: hasChanges ? 'pointer' : 'not-allowed',
+                opacity: hasChanges ? 1 : 0.6,
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <RotateCcw size={16} />
+              {t('attendance.reset') || 'Reset'}
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!hasChanges}
+              className='btn'
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                fontSize: '14px',
+                backgroundColor: hasChanges ? '#4caf50' : '#f5f5f5',
+                color: hasChanges ? '#fff' : '#999',
+                border: `1px solid ${hasChanges ? '#4caf50' : '#e0e0e0'}`,
+                cursor: hasChanges ? 'pointer' : 'not-allowed',
+                opacity: hasChanges ? 1 : 0.6,
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <Check size={16} />
+              {t('attendance.confirm') || 'Confirm'}
+            </button>
+          </div>
         </div>
 
         <div className='table-container' style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
@@ -309,7 +393,12 @@ export default function AttendancePlan() {
                     </select>
                   </td>
                   <td style={{ position: 'sticky', left: '330px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
-                    <select defaultValue={emp.shiftTeam} className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}>
+                    <select 
+                      value={emp.shiftTeam} 
+                      onChange={(e) => handleEmployeeUpdate(emp.id, 'shiftTeam', e.target.value)}
+                      className={`badge ${getShiftClass(emp.shiftTeam)}`} 
+                      style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}
+                    >
                       <option value="Green">{t('filter.green')}</option>
                       <option value="Blue">{t('filter.blue')}</option>
                       <option value="Orange">{t('filter.orange')}</option>
