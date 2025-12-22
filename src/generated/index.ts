@@ -6,10 +6,12 @@
 // Models
 export * as AttendancePlanModel from './models/AttendancePlanModel';
 export * as CommonModels from './models/CommonModels';
+export * as Jia_shiftsModel from './models/Jia_shiftsModel';
 export * as Office365UsersModel from './models/Office365UsersModel';
 export * as SharePointModel from './models/SharePointModel';
 
 // Services
 export * from './services/AttendancePlanService';
+export * from './services/Jia_shiftsService';
 export * from './services/Office365UsersService';
 export * from './services/SharePointService';

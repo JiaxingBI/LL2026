@@ -1,43 +1,37 @@
 {
-  "appId": "b3c06711-de66-401a-9ccb-c5ade5fb2dc7",
+  "appId": "27fdf297-51f5-41da-8dc7-e0201e74d883",
   "appDisplayName": "LaborLink",
   "description": null,
-  "environmentId": "2f748ff5-5b97-e180-a132-e3fe17813019",
+  "environmentId": "558480fb-f006-eb81-8453-61565adacd1a",
   "buildPath": "./dist",
   "buildEntryPoint": "index.html",
   "logoPath": "Default",
   "localAppUrl": "http://localhost:3000/",
   "region": "prod",
   "connectionReferences": {
-    "69908efa-7927-4233-bc32-73a7bdba63f0": {
+    "0cc13ee6-3199-4796-bab5-5eb56c59f642": {
       "id": "/providers/Microsoft.PowerApps/apis/shared_office365users",
       "displayName": "Office 365 Users",
       "dataSources": [
         "office365users"
       ],
-      "authenticationType": null,
-      "sharedConnectionId": null,
       "dataSets": {}
-    },
-    "195fe690-3496-4b8a-be1e-fb460846945a": {
-      "id": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
-      "displayName": "SharePoint",
-      "dataSources": [
-        "sharepointonline",
-        "attendanceplan"
-      ],
-      "authenticationType": null,
-      "sharedConnectionId": null,
-      "dataSets": {
-        "https://wsk5l.sharepoint.com/sites/CodeAppdev": {
-          "dataSources": {
-            "attendanceplan": {
-              "tableName": "AttendancePlan"
-            }
-          }
-        }
-      }
     }
   },
-  "databaseReferences": {}
+  "databaseReferences": {
+    "default.cds": {
+      "state": "Configured",
+      "instanceUrl": "https://org196c3852.crm.dynamics.com/",
+      "webApiVersion": "v9.0",
+      "dataSources": {
+        "shifts": {
+          "entitySetName": "jia_shifts",
+          "logicalName": "jia_shift",
+          "isHidden": false
+        }
+      },
+      "version": "v9.0",
+      "environmentVariableName": ""
+    }
+  }
 }

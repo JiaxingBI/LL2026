@@ -5,6 +5,13 @@
  */
 
 export const dataSourcesInfo = {
+  "jia_shifts": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "jia_shiftid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "office365users": {
     "tableId": "",
     "version": "",
