@@ -14404,10 +14404,10 @@
       }
     },
     "runtimeUrls": [
-      "https://2f748ff5-5b97-e180-a132-e3fe17813019.15.common.usa002.azure-apihub.net/apim/sharepointonline"
+      "https://558480fb-f006-eb81-8453-61565adacd1a.00.common.usa002.azure-apihub.net/apim/sharepointonline"
     ],
-    "primaryRuntimeUrl": "https://2f748ff5-5b97-e180-a132-e3fe17813019.15.common.usa002.azure-apihub.net/apim/sharepointonline",
-    "doNotUseApiHubNetRuntimeUrl": "https://2f748ff5-5b97-e180-a132-e3fe17813019.15.common.usa002.azure-apihub.net/apim/sharepointonline",
+    "primaryRuntimeUrl": "https://558480fb-f006-eb81-8453-61565adacd1a.00.common.usa002.azure-apihub.net/apim/sharepointonline",
+    "doNotUseApiHubNetRuntimeUrl": "https://558480fb-f006-eb81-8453-61565adacd1a.00.common.usa002.azure-apihub.net/apim/sharepointonline",
     "metadata": {
       "source": "marketplace",
       "brandColor": "",

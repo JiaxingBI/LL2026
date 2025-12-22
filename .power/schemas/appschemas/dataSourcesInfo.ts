@@ -5,6 +5,20 @@
  */
 
 export const dataSourcesInfo = {
+  "jia_adjustments": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "jia_adjustmentid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "jia_ll_attendances": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "jia_ll_attendanceid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "jia_shifts": {
     "tableId": "",
     "version": "",
