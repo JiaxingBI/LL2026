@@ -7,6 +7,28 @@ import type { Employee, Adjustment, ShiftEntry } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import { useLanguage } from '../contexts/LanguageContext';
 
+type ShiftType = 'Day' | 'Night';
+
+function getUtc8Now(): Date {
+  const now = new Date();
+  const utcMillis = now.getTime() + now.getTimezoneOffset() * 60_000;
+  return new Date(utcMillis + 8 * 60 * 60_000);
+}
+
+function inferShiftTypeUtc8(nowUtc8: Date): ShiftType {
+  const hour = nowUtc8.getHours();
+  return hour >= 7 && hour < 19 ? 'Day' : 'Night';
+}
+
+function toDateKey(month: number, day: number): string {
+  return `${month}/${day}`;
+}
+
+function toIsoDateFromKey(year: number, dateKey: string): string {
+  const [month, day] = dateKey.split('/').map(Number);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 // Convert a Dataverse row into the Employee shape that the UI expects
 function transformDataverseToEmployee(record: Jia_ll_attendances): Employee {
   const id = record.jia_title || '' as Employee['id'];
@@ -69,6 +91,22 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [filterNearDates, setFilterNearDates] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // View mode: editable pivot table vs vertical gallery
+  const [viewMode, setViewMode] = useState<'pivot' | 'gallery'>('pivot');
+
+  // Gallery slicer state: date + shift
+  const [selectedDateKey, setSelectedDateKey] = useState(() => {
+    const nowUtc8 = getUtc8Now();
+    return toDateKey(nowUtc8.getMonth() + 1, nowUtc8.getDate());
+  });
+  const [selectedShiftType, setSelectedShiftType] = useState<ShiftType>(() => inferShiftTypeUtc8(getUtc8Now()));
+
+  // Gallery membership additions without mutating the schedule grid
+  const [manualGalleryAdds, setManualGalleryAdds] = useState<Record<string, string[]>>({});
+  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [addEmployeeId, setAddEmployeeId] = useState<string>('');
+  const [addSearchQuery, setAddSearchQuery] = useState<string>('');
   
   // Track original Dataverse records for diffing on save
   const originalRecordsRef = useRef<Map<string, Jia_ll_attendances>>(new Map());
@@ -359,6 +397,16 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   const dates = filteredDates;
 
+  // Keep selected date valid when the visible date window changes
+  useEffect(() => {
+    if (dates.length === 0) return;
+    if (!dates.includes(selectedDateKey)) {
+      const nowUtc8 = getUtc8Now();
+      const defaultKey = toDateKey(nowUtc8.getMonth() + 1, nowUtc8.getDate());
+      setSelectedDateKey(dates.includes(defaultKey) ? defaultKey : dates[0]);
+    }
+  }, [dates, selectedDateKey]);
+
   // Check if a date string matches today
   const isToday = (dateStr: string) => {
     const today = new Date();
@@ -408,6 +456,111 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       default: return 'transparent';
     }
   };
+
+  const gallerySliceKey = useMemo(() => `${selectedDateKey}|${selectedShiftType}`, [selectedDateKey, selectedShiftType]);
+  const manualIdsForSlice = manualGalleryAdds[gallerySliceKey] || [];
+
+  const scheduledIdsForSlice = useMemo(() => {
+    const ids: string[] = [];
+    for (const emp of employees) {
+      const shiftEntry = emp.shifts[selectedDateKey];
+      const cellValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
+      if (String(cellValue).trim() !== '') ids.push(emp.id);
+    }
+    return ids;
+  }, [employees, selectedDateKey, selectedShiftType]);
+
+  const galleryIdSet = useMemo(() => {
+    return new Set<string>([...scheduledIdsForSlice, ...manualIdsForSlice]);
+  }, [scheduledIdsForSlice, manualIdsForSlice]);
+
+  const galleryEmployees = useMemo(() => {
+    // Apply the same search + team filters to the gallery rows
+    return filteredEmployees.filter(emp => galleryIdSet.has(emp.id));
+  }, [filteredEmployees, galleryIdSet]);
+
+  const availableEmployeesForGallery = useMemo(() => {
+    // Per spec: choose from whole list not currently in this gallery slice
+    return employees.filter(emp => !galleryIdSet.has(emp.id));
+  }, [employees, galleryIdSet]);
+
+  const filteredAvailableEmployeesForGallery = useMemo(() => {
+    const query = addSearchQuery.toLowerCase().trim();
+    if (!query) return availableEmployeesForGallery;
+    return availableEmployeesForGallery.filter(emp => {
+      return emp.id.toLowerCase().includes(query) || emp.name.toLowerCase().includes(query);
+    });
+  }, [availableEmployeesForGallery, addSearchQuery]);
+
+  const addAdjustmentRecord = useCallback((payload: Omit<Adjustment, 'id'>) => {
+    const record: Adjustment = {
+      ...payload,
+      id: Date.now().toString()
+    };
+    setAdjustments(prev => [...prev, record]);
+    setHasChanges(true);
+  }, []);
+
+  const handleLeaveClick = useCallback((emp: Employee) => {
+    const year = getUtc8Now().getFullYear();
+    const dateStr = toIsoDateFromKey(year, selectedDateKey);
+    const shiftEntry = emp.shifts[selectedDateKey];
+    const originalValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
+    const originalHours = parseInt(originalValue) || 0;
+
+    addAdjustmentRecord({
+      employeeId: emp.id,
+      name: emp.name,
+      role: emp.role,
+      indirectDirect: emp.indirectDirect,
+      workStatus: emp.status,
+      shiftTeam: emp.shiftTeam,
+      gender: emp.gender,
+      date: dateStr,
+      isNight: selectedShiftType === 'Night',
+      originalHours,
+      hours: 0,
+      adjustmentType: 'Leave',
+      reason: 'Leave',
+      comments: ''
+    });
+  }, [addAdjustmentRecord, selectedDateKey, selectedShiftType]);
+
+  const handleAddWorkerToGallery = useCallback(() => {
+    if (!addEmployeeId) return;
+    const emp = employees.find(e => e.id === addEmployeeId);
+    if (!emp) return;
+
+    setManualGalleryAdds(prev => {
+      const existing = prev[gallerySliceKey] || [];
+      if (existing.includes(addEmployeeId)) return prev;
+      return { ...prev, [gallerySliceKey]: [...existing, addEmployeeId] };
+    });
+
+    const year = getUtc8Now().getFullYear();
+    const dateStr = toIsoDateFromKey(year, selectedDateKey);
+
+    addAdjustmentRecord({
+      employeeId: emp.id,
+      name: emp.name,
+      role: emp.role,
+      indirectDirect: emp.indirectDirect,
+      workStatus: emp.status,
+      shiftTeam: emp.shiftTeam,
+      gender: emp.gender,
+      date: dateStr,
+      isNight: selectedShiftType === 'Night',
+      originalHours: 0,
+      hours: 12,
+      adjustmentType: 'Overtime',
+      reason: 'Work Overtime',
+      comments: ''
+    });
+
+    setAddEmployeeId('');
+    setAddSearchQuery('');
+    setShowAddPicker(false);
+  }, [addEmployeeId, addAdjustmentRecord, employees, gallerySliceKey, selectedDateKey, selectedShiftType]);
 
   return (
     // Layout: header + toolbar + table + adjustment panel
@@ -548,6 +701,23 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
           {/* Confirm and Reset Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
+              onClick={() => setViewMode(prev => (prev === 'pivot' ? 'gallery' : 'pivot'))}
+              className='btn'
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                fontSize: '14px',
+                backgroundColor: '#f5f5f5',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                cursor: 'pointer'
+              }}
+            >
+              Switch View
+            </button>
+            <button
               onClick={handleReset}
               disabled={!hasChanges}
               className='btn'
@@ -592,138 +762,347 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
           </div>
         </div>
 
-        <div className='table-container' style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
-          <table style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
-            <thead>
-              <tr>
-                <th style={{ width: '40px', minWidth: '40px', position: 'sticky', top: 0, left: 0, background: '#fafafa', zIndex: 5 }}>{t('attendance.id')}</th>
-                <th style={{ width: '80px', minWidth: '80px', position: 'sticky', top: 0, left: '40px', background: '#fafafa', zIndex: 5 }}>{t('attendance.name')}</th>
-                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '120px', background: '#fafafa', zIndex: 5 }}>{t('attendance.role')}</th>
-                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '190px', background: '#fafafa', zIndex: 5 }}>{t('attendance.id_status')}</th>
-                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '260px', background: '#fafafa', zIndex: 5 }}>{t('attendance.status')}</th>
-                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '330px', background: '#fafafa', zIndex: 5 }}>{t('attendance.shift')}</th>
-                <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '400px', background: '#fafafa', zIndex: 5, boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>{t('attendance.gender')}</th>
-                {dates.map(date => {
-                  const todayHighlight = isToday(date);
-                  const headerStyle = {
-                    textAlign: 'center' as const,
-                    minWidth: '60px',
-                    borderLeft: '1px solid #eee',
-                    position: 'sticky' as const,
-                    top: 0,
-                    background: '#fafafa',
-                    zIndex: 4,
-                    ...(todayHighlight && {
-                      background: 'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)',
-                      color: 'white',
-                      boxShadow: '0 2px 8px rgba(59, 130, 246, 0.4)'
-                    })
-                  };
+        {viewMode === 'gallery' && (
+          <div style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--border-color)',
+            background: '#fafafa',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+          }}>
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {dates.flatMap(dateKey =>
+                (['Day', 'Night'] as const).map(shift => {
+                  const isSelected = selectedDateKey === dateKey && selectedShiftType === shift;
                   return (
-                    <React.Fragment key={date}>
-                      <th style={headerStyle}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <span style={{ fontWeight: todayHighlight ? 'bold' : 'normal' }}>{date}</span>
-                          <span style={{ fontSize: '10px', color: todayHighlight ? 'rgba(255,255,255,0.8)' : '#999', fontWeight: 'normal' }}>{t('attendance.day')}</span>
-                        </div>
-                      </th>
-                      <th style={headerStyle}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <span style={{ fontWeight: todayHighlight ? 'bold' : 'normal' }}>{date}</span>
-                          <span style={{ fontSize: '10px', color: todayHighlight ? 'rgba(255,255,255,0.8)' : '#999', fontWeight: 'normal' }}>{t('attendance.night')}</span>
-                        </div>
-                      </th>
-                    </React.Fragment>
+                    <button
+                      key={`${dateKey}|${shift}`}
+                      onClick={() => {
+                        setSelectedDateKey(dateKey);
+                        setSelectedShiftType(shift);
+                      }}
+                      className={`btn ${isSelected ? 'btn-secondary' : 'btn-ghost'}`}
+                      style={{
+                        fontSize: '13px',
+                        padding: '8px 12px',
+                        backgroundColor: isSelected ? '#eff6ff' : 'transparent',
+                        color: isSelected ? 'var(--accent-blue)' : 'inherit',
+                        border: isSelected ? '1px solid var(--accent-blue)' : '1px solid transparent',
+                        borderRadius: '10px',
+                        whiteSpace: 'nowrap',
+                        minWidth: '92px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        lineHeight: 1.1
+                      }}
+                    >
+                      <span style={{ fontWeight: 700 }}>{dateKey}</span>
+                      <span style={{ fontSize: '11px', opacity: 0.85 }}>
+                        {shift === 'Day' ? t('attendance.day') : t('attendance.night')}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {viewMode === 'pivot' ? (
+          <div className='table-container' style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
+            <table style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: '40px', minWidth: '40px', position: 'sticky', top: 0, left: 0, background: '#fafafa', zIndex: 5 }}>{t('attendance.id')}</th>
+                  <th style={{ width: '80px', minWidth: '80px', position: 'sticky', top: 0, left: '40px', background: '#fafafa', zIndex: 5 }}>{t('attendance.name')}</th>
+                  <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '120px', background: '#fafafa', zIndex: 5 }}>{t('attendance.role')}</th>
+                  <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '190px', background: '#fafafa', zIndex: 5 }}>{t('attendance.id_status')}</th>
+                  <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '260px', background: '#fafafa', zIndex: 5 }}>{t('attendance.status')}</th>
+                  <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '330px', background: '#fafafa', zIndex: 5 }}>{t('attendance.shift')}</th>
+                  <th style={{ width: '70px', minWidth: '70px', position: 'sticky', top: 0, left: '400px', background: '#fafafa', zIndex: 5, boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>{t('attendance.gender')}</th>
+                  {dates.map(date => {
+                    const todayHighlight = isToday(date);
+                    const headerStyle = {
+                      textAlign: 'center' as const,
+                      minWidth: '60px',
+                      borderLeft: '1px solid #eee',
+                      position: 'sticky' as const,
+                      top: 0,
+                      background: '#fafafa',
+                      zIndex: 4,
+                      ...(todayHighlight && {
+                        background: 'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)',
+                        color: 'white',
+                        boxShadow: '0 2px 8px rgba(59, 130, 246, 0.4)'
+                      })
+                    };
+                    return (
+                      <React.Fragment key={date}>
+                        <th style={headerStyle}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            <span style={{ fontWeight: todayHighlight ? 'bold' : 'normal' }}>{date}</span>
+                            <span style={{ fontSize: '10px', color: todayHighlight ? 'rgba(255,255,255,0.8)' : '#999', fontWeight: 'normal' }}>{t('attendance.day')}</span>
+                          </div>
+                        </th>
+                        <th style={headerStyle}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            <span style={{ fontWeight: todayHighlight ? 'bold' : 'normal' }}>{date}</span>
+                            <span style={{ fontSize: '10px', color: todayHighlight ? 'rgba(255,255,255,0.8)' : '#999', fontWeight: 'normal' }}>{t('attendance.night')}</span>
+                          </div>
+                        </th>
+                      </React.Fragment>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEmployees.map((emp, rowIndex) => {
+                  const rowBg = getRowBackgroundColor(emp.shiftTeam);
+                  return (
+                  <tr key={`${emp.id}-${rowIndex}`} style={{ backgroundColor: rowBg }}>
+                    <td style={{ color: '#666', position: 'sticky', left: 0, background: rowBg, zIndex: 1, width: '40px', minWidth: '40px' }}>{emp.id}</td>
+                    <td style={{ fontWeight: '500', position: 'sticky', left: '40px', background: rowBg, zIndex: 1, width: '80px', minWidth: '80px' }}>{emp.name}</td>
+                    <td style={{ color: '#666', position: 'sticky', left: '120px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
+                      <select defaultValue={emp.role} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
+                        <option value="TC.L1">TC.L1</option>
+                        <option value="TC.L2">TC.L2</option>
+                        <option value="TC.L3">TC.L3</option>
+                        <option value="Hall Asist">Hall Asist</option>
+                        <option value="Infeeder">Infeeder</option>
+                        <option value="Sr.Infeeder">Sr.Infeeder</option>
+                        <option value="Ops.L1">Ops.L1</option>
+                      </select>
+                    </td>
+                    <td style={{ color: '#666', position: 'sticky', left: '190px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
+                      <select defaultValue={emp.indirectDirect} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
+                        <option value="Direct">{t('id.direct')}</option>
+                        <option value="Indirect">{t('id.indirect')}</option>
+                      </select>
+                    </td>
+                    <td style={{ color: '#666', position: 'sticky', left: '260px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
+                      <select defaultValue={emp.status} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
+                        <option value="Prod.">Prod.</option>
+                        <option value="Jail">Jail</option>
+                        <option value="DailyProduction">DailyProduction</option>
+                      </select>
+                    </td>
+                    <td style={{ position: 'sticky', left: '330px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
+                      <select 
+                        value={emp.shiftTeam} 
+                        onChange={(e) => handleEmployeeUpdate(emp.id, 'shiftTeam', e.target.value)}
+                        className={`badge ${getShiftClass(emp.shiftTeam)}`} 
+                        style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}
+                      >
+                        <option value="Green">{t('filter.green')}</option>
+                        <option value="Blue">{t('filter.blue')}</option>
+                        <option value="Orange">{t('filter.orange')}</option>
+                        <option value="Yellow">{t('filter.yellow')}</option>
+                      </select>
+                    </td>
+                    <td style={{ color: '#666', position: 'sticky', left: '400px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px', boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>
+                      <select defaultValue={emp.gender} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
+                        <option value="Male">{t('gender.male')}</option>
+                        <option value="Female">{t('gender.female')}</option>
+                      </select>
+                    </td>
+                    {dates.map(date => (
+                      <React.Fragment key={date}>
+                        <td style={{ padding: '8px', borderLeft: '1px solid #f5f5f5' }}>
+                          <input 
+                            type='text' 
+                            defaultValue={emp.shifts[date]?.day || ''} 
+                            onBlur={(e) => {
+                              const originalValue = emp.shifts[date]?.day || '';
+                              if (e.target.value !== originalValue) {
+                                handleShiftChange(emp, date, false, e.target.value);
+                              }
+                            }}
+                            style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
+                          />
+                        </td>
+                        <td style={{ padding: '8px', borderLeft: '1px solid #f5f5f5' }}>
+                          <input 
+                            type='text' 
+                            defaultValue={emp.shifts[date]?.night || ''} 
+                            onBlur={(e) => {
+                              const originalValue = emp.shifts[date]?.night || '';
+                              if (e.target.value !== originalValue) {
+                                handleShiftChange(emp, date, true, e.target.value);
+                              }
+                            }}
+                            style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
+                          />
+                        </td>
+                      </React.Fragment>
+                    ))}
+                  </tr>
                   );
                 })}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredEmployees.map((emp, rowIndex) => {
-                const rowBg = getRowBackgroundColor(emp.shiftTeam);
-                return (
-                <tr key={`${emp.id}-${rowIndex}`} style={{ backgroundColor: rowBg }}>
-                  <td style={{ color: '#666', position: 'sticky', left: 0, background: rowBg, zIndex: 1, width: '40px', minWidth: '40px' }}>{emp.id}</td>
-                  <td style={{ fontWeight: '500', position: 'sticky', left: '40px', background: rowBg, zIndex: 1, width: '80px', minWidth: '80px' }}>{emp.name}</td>
-                  <td style={{ color: '#666', position: 'sticky', left: '120px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
-                    <select defaultValue={emp.role} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
-                      <option value="TC.L1">TC.L1</option>
-                      <option value="TC.L2">TC.L2</option>
-                      <option value="TC.L3">TC.L3</option>
-                      <option value="Hall Asist">Hall Asist</option>
-                      <option value="Infeeder">Infeeder</option>
-                      <option value="Sr.Infeeder">Sr.Infeeder</option>
-                      <option value="Ops.L1">Ops.L1</option>
-                    </select>
-                  </td>
-                  <td style={{ color: '#666', position: 'sticky', left: '190px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
-                    <select defaultValue={emp.indirectDirect} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
-                      <option value="Direct">{t('id.direct')}</option>
-                      <option value="Indirect">{t('id.indirect')}</option>
-                    </select>
-                  </td>
-                  <td style={{ color: '#666', position: 'sticky', left: '260px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
-                    <select defaultValue={emp.status} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
-                      <option value="Prod.">Prod.</option>
-                      <option value="Jail">Jail</option>
-                      <option value="DailyProduction">DailyProduction</option>
-                    </select>
-                  </td>
-                  <td style={{ position: 'sticky', left: '330px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px' }}>
-                    <select 
-                      value={emp.shiftTeam} 
-                      onChange={(e) => handleEmployeeUpdate(emp.id, 'shiftTeam', e.target.value)}
-                      className={`badge ${getShiftClass(emp.shiftTeam)}`} 
-                      style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {galleryEmployees.length === 0 ? (
+                <div style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                  No employees in this date/shift view.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {galleryEmployees.map(emp => {
+                    const rowBg = getRowBackgroundColor(emp.shiftTeam);
+                    return (
+                      <div
+                        key={emp.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '60px 140px 110px 90px 110px 90px 90px 110px',
+                          gap: '8px',
+                          alignItems: 'center',
+                          padding: '10px 16px',
+                          borderBottom: '1px solid #f5f5f5',
+                          background: rowBg
+                        }}
+                      >
+                        <div style={{ color: '#666' }}>{emp.id}</div>
+                        <div style={{ fontWeight: 500 }}>{emp.name}</div>
+                        <div style={{ color: '#666' }}>{emp.role}</div>
+                        <div style={{ color: '#666' }}>{emp.indirectDirect}</div>
+                        <div style={{ color: '#666' }}>{emp.status}</div>
+                        <div style={{ color: '#666' }}>{emp.shiftTeam}</div>
+                        <div style={{ color: '#666' }}>{emp.gender}</div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => handleLeaveClick(emp)}
+                            className='btn'
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '13px',
+                              backgroundColor: '#fff3e0',
+                              color: '#e65100',
+                              border: '1px solid #ffcc80',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Leave
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color)', background: '#fafafa' }}>
+              <button
+                onClick={() => setShowAddPicker(prev => !prev)}
+                className='btn'
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  backgroundColor: '#f5f5f5',
+                  border: '1px solid var(--border-color)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                <span style={{ fontSize: '18px', lineHeight: 1 }}>+</span>
+                <span>Add worker to this shift</span>
+              </button>
+
+              {showAddPicker && (
+                <div style={{
+                  marginTop: '10px',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                  background: 'white',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  <div style={{ position: 'relative' }}>
+                    <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
+                    <input
+                      type='text'
+                      value={addSearchQuery}
+                      onChange={(e) => setAddSearchQuery(e.target.value)}
+                      placeholder='Search by ID or Name'
+                      className='input'
+                      style={{ paddingLeft: '36px', width: '100%' }}
+                    />
+                  </div>
+
+                  <div style={{
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    border: '1px solid #f0f0f0',
+                    borderRadius: '8px'
+                  }}>
+                    {filteredAvailableEmployeesForGallery.length === 0 ? (
+                      <div style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                        No matching workers.
+                      </div>
+                    ) : (
+                      filteredAvailableEmployeesForGallery.map(emp => {
+                        const selected = addEmployeeId === emp.id;
+                        return (
+                          <button
+                            key={emp.id}
+                            onClick={() => setAddEmployeeId(emp.id)}
+                            className='btn'
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '10px 12px',
+                              border: 'none',
+                              borderBottom: '1px solid #f5f5f5',
+                              background: selected ? '#eff6ff' : 'transparent',
+                              color: selected ? 'var(--accent-blue)' : 'inherit',
+                              borderRadius: 0,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <div style={{ fontWeight: 600 }}>{emp.id}</div>
+                            <div style={{ fontSize: '12px', color: selected ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>{emp.name}</div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={handleAddWorkerToGallery}
+                      disabled={!addEmployeeId}
+                      className='btn'
+                      style={{
+                        padding: '8px 14px',
+                        fontSize: '13px',
+                        backgroundColor: addEmployeeId ? '#4caf50' : '#f5f5f5',
+                        color: addEmployeeId ? '#fff' : '#999',
+                        border: `1px solid ${addEmployeeId ? '#4caf50' : '#e0e0e0'}`,
+                        cursor: addEmployeeId ? 'pointer' : 'not-allowed',
+                        opacity: addEmployeeId ? 1 : 0.6
+                      }}
                     >
-                      <option value="Green">{t('filter.green')}</option>
-                      <option value="Blue">{t('filter.blue')}</option>
-                      <option value="Orange">{t('filter.orange')}</option>
-                      <option value="Yellow">{t('filter.yellow')}</option>
-                    </select>
-                  </td>
-                  <td style={{ color: '#666', position: 'sticky', left: '400px', background: rowBg, zIndex: 1, width: '70px', minWidth: '70px', boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>
-                    <select defaultValue={emp.gender} style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}>
-                      <option value="Male">{t('gender.male')}</option>
-                      <option value="Female">{t('gender.female')}</option>
-                    </select>
-                  </td>
-                  {dates.map(date => (
-                    <React.Fragment key={date}>
-                      <td style={{ padding: '8px', borderLeft: '1px solid #f5f5f5' }}>
-                        <input 
-                          type='text' 
-                          defaultValue={emp.shifts[date]?.day || ''} 
-                          onBlur={(e) => {
-                            const originalValue = emp.shifts[date]?.day || '';
-                            if (e.target.value !== originalValue) {
-                              handleShiftChange(emp, date, false, e.target.value);
-                            }
-                          }}
-                          style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
-                        />
-                      </td>
-                      <td style={{ padding: '8px', borderLeft: '1px solid #f5f5f5' }}>
-                        <input 
-                          type='text' 
-                          defaultValue={emp.shifts[date]?.night || ''} 
-                          onBlur={(e) => {
-                            const originalValue = emp.shifts[date]?.night || '';
-                            if (e.target.value !== originalValue) {
-                              handleShiftChange(emp, date, true, e.target.value);
-                            }
-                          }}
-                          style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
-                        />
-                      </td>
-                    </React.Fragment>
-                  ))}
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Adjustment Table shows auto-generated adjustments from shift edits */}
