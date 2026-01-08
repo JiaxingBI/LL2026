@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Search, Check, RotateCcw, RefreshCw } from 'lucide-react';
+import { Search, Check, RotateCcw, RefreshCw, Sun, Moon } from 'lucide-react';
 import { mockEmployees, mockAdjustments } from '../data/mockData';
 import { Jia_ll_attendancesService } from '../generated/services/Jia_ll_attendancesService';
 import type { Jia_ll_attendances } from '../generated/models/Jia_ll_attendancesModel';
@@ -27,6 +27,20 @@ function toDateKey(month: number, day: number): string {
 function toIsoDateFromKey(year: number, dateKey: string): string {
   const [month, day] = dateKey.split('/').map(Number);
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function isoAddDays(isoDate: string, deltaDays: number): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const dt = new Date(Date.UTC(year, month - 1, day + deltaDays));
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function toDateKeyFromIso(isoDate: string): string {
+  const [, month, day] = isoDate.split('-').map(Number);
+  return `${month}/${day}`;
 }
 
 // Convert a Dataverse row into the Employee shape that the UI expects
@@ -93,7 +107,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // View mode: editable pivot table vs vertical gallery
-  const [viewMode, setViewMode] = useState<'pivot' | 'gallery'>('pivot');
+  const [viewMode, setViewMode] = useState<'pivot' | 'gallery'>('gallery');
 
   // Gallery slicer state: date + shift
   const [selectedDateKey, setSelectedDateKey] = useState(() => {
@@ -102,8 +116,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   });
   const [selectedShiftType, setSelectedShiftType] = useState<ShiftType>(() => inferShiftTypeUtc8(getUtc8Now()));
 
-  // Gallery membership additions without mutating the schedule grid
-  const [manualGalleryAdds, setManualGalleryAdds] = useState<Record<string, string[]>>({});
+  // Gallery is a view over the same schedule grid used by Pivot
+  const [galleryHourDrafts, setGalleryHourDrafts] = useState<Record<string, { value: string; touched: boolean }>>({});
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [addEmployeeId, setAddEmployeeId] = useState<string>('');
   const [addSearchQuery, setAddSearchQuery] = useState<string>('');
@@ -249,7 +263,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       } else if (successCount > 0) {
         alert(`Successfully saved ${successCount} records!`);
       } else {
-        alert(t('attendance.changesSaved') || 'No changes to save.');
+        alert(t('attendance.noChangesToSave'));
       }
     } catch (err: any) {
       console.error('Save failed:', err);
@@ -286,6 +300,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const originalValue = isNight ? (originalShift?.night || '') : (originalShift?.day || '');
     const originalHours = parseInt(originalValue) || 0;
     const newHours = parseInt(newValue) || 0;
+    const normalizedValue = newHours === 0 ? '' : String(newHours);
 
     // Update the employee's shift data
     setEmployees(prevEmployees => 
@@ -296,9 +311,9 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             newShifts[date] = { day: '', night: '' };
           }
           if (isNight) {
-            newShifts[date] = { ...newShifts[date], night: newValue };
+            newShifts[date] = { ...newShifts[date], night: normalizedValue };
           } else {
-            newShifts[date] = { ...newShifts[date], day: newValue };
+            newShifts[date] = { ...newShifts[date], day: normalizedValue };
           }
           return { ...e, shifts: newShifts };
         }
@@ -371,21 +386,29 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   // Optional date window filter; controlled by the near-dates toggle
   // When filterNearDates is ON: show ~14 days around today
   // When filterNearDates is OFF: show current month ± 1 month (~90 days) to prevent performance issues
+  const baseDateForWindow = useMemo(() => {
+    const year = getUtc8Now().getFullYear();
+    if (viewMode !== 'gallery') return new Date();
+    const [month, day] = selectedDateKey.split('/').map(Number);
+    if (!month || !day) return new Date();
+    return new Date(year, month - 1, day);
+  }, [viewMode, selectedDateKey]);
+
   const filteredDates = useMemo(() => {
-    const today = new Date();
-    const year = today.getFullYear();
+    const anchor = baseDateForWindow;
+    const year = anchor.getFullYear();
     
     let startDate: Date;
     let endDate: Date;
     
     if (filterNearDates) {
       // Near dates: 1 day before to 12 days after
-      startDate = new Date(year, today.getMonth(), today.getDate() - 1);
-      endDate = new Date(year, today.getMonth(), today.getDate() + 12);
+      startDate = new Date(year, anchor.getMonth(), anchor.getDate() - 1);
+      endDate = new Date(year, anchor.getMonth(), anchor.getDate() + 12);
     } else {
       // Extended view: current month ± 1 month (prevents browser crash from 730 columns)
-      startDate = new Date(year, today.getMonth() - 1, 1);
-      endDate = new Date(year, today.getMonth() + 2, 0); // Last day of next month
+      startDate = new Date(year, anchor.getMonth() - 1, 1);
+      endDate = new Date(year, anchor.getMonth() + 2, 0); // Last day of next month
     }
     
     return allDates.filter(dateStr => {
@@ -393,7 +416,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       const date = new Date(year, month - 1, day);
       return date >= startDate && date <= endDate;
     });
-  }, [allDates, filterNearDates]);
+  }, [allDates, filterNearDates, baseDateForWindow]);
 
   const dates = filteredDates;
 
@@ -458,31 +481,29 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   };
 
   const gallerySliceKey = useMemo(() => `${selectedDateKey}|${selectedShiftType}`, [selectedDateKey, selectedShiftType]);
-  const manualIdsForSlice = manualGalleryAdds[gallerySliceKey] || [];
 
   const scheduledIdsForSlice = useMemo(() => {
     const ids: string[] = [];
     for (const emp of employees) {
       const shiftEntry = emp.shifts[selectedDateKey];
       const cellValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
-      if (String(cellValue).trim() !== '') ids.push(emp.id);
+      const parsed = parseInt(String(cellValue), 10);
+      if (Number.isFinite(parsed) && parsed > 0) ids.push(emp.id);
     }
     return ids;
   }, [employees, selectedDateKey, selectedShiftType]);
 
-  const galleryIdSet = useMemo(() => {
-    return new Set<string>([...scheduledIdsForSlice, ...manualIdsForSlice]);
-  }, [scheduledIdsForSlice, manualIdsForSlice]);
+  const scheduledIdSet = useMemo(() => new Set<string>(scheduledIdsForSlice), [scheduledIdsForSlice]);
 
   const galleryEmployees = useMemo(() => {
     // Apply the same search + team filters to the gallery rows
-    return filteredEmployees.filter(emp => galleryIdSet.has(emp.id));
-  }, [filteredEmployees, galleryIdSet]);
+    return filteredEmployees.filter(emp => scheduledIdSet.has(emp.id));
+  }, [filteredEmployees, scheduledIdSet]);
 
   const availableEmployeesForGallery = useMemo(() => {
     // Per spec: choose from whole list not currently in this gallery slice
-    return employees.filter(emp => !galleryIdSet.has(emp.id));
-  }, [employees, galleryIdSet]);
+    return employees.filter(emp => !scheduledIdSet.has(emp.id));
+  }, [employees, scheduledIdSet]);
 
   const filteredAvailableEmployeesForGallery = useMemo(() => {
     const query = addSearchQuery.toLowerCase().trim();
@@ -500,6 +521,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setAdjustments(prev => [...prev, record]);
     setHasChanges(true);
   }, []);
+
+  useEffect(() => {
+    setGalleryHourDrafts({});
+  }, [gallerySliceKey]);
 
   const handleLeaveClick = useCallback((emp: Employee) => {
     const year = getUtc8Now().getFullYear();
@@ -526,41 +551,124 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
   }, [addAdjustmentRecord, selectedDateKey, selectedShiftType]);
 
+  const toggleLeaveForEmployee = useCallback((emp: Employee) => {
+    const year = getUtc8Now().getFullYear();
+    const dateStr = toIsoDateFromKey(year, selectedDateKey);
+    const isNight = selectedShiftType === 'Night';
+
+    const existing = adjustments.find(a =>
+      a.employeeId === emp.id &&
+      a.date === dateStr &&
+      a.isNight === isNight &&
+      a.adjustmentType === 'Leave'
+    );
+
+    if (existing) {
+      setAdjustments(prev => prev.filter(a => a.id !== existing.id));
+      setHasChanges(true);
+      return;
+    }
+
+    handleLeaveClick(emp);
+  }, [adjustments, handleLeaveClick, selectedDateKey, selectedShiftType]);
+
   const handleAddWorkerToGallery = useCallback(() => {
     if (!addEmployeeId) return;
     const emp = employees.find(e => e.id === addEmployeeId);
     if (!emp) return;
 
-    setManualGalleryAdds(prev => {
-      const existing = prev[gallerySliceKey] || [];
-      if (existing.includes(addEmployeeId)) return prev;
-      return { ...prev, [gallerySliceKey]: [...existing, addEmployeeId] };
-    });
-
-    const year = getUtc8Now().getFullYear();
-    const dateStr = toIsoDateFromKey(year, selectedDateKey);
-
-    addAdjustmentRecord({
-      employeeId: emp.id,
-      name: emp.name,
-      role: emp.role,
-      indirectDirect: emp.indirectDirect,
-      workStatus: emp.status,
-      shiftTeam: emp.shiftTeam,
-      gender: emp.gender,
-      date: dateStr,
-      isNight: selectedShiftType === 'Night',
-      originalHours: 0,
-      hours: 12,
-      adjustmentType: 'Overtime',
-      reason: 'Work Overtime',
-      comments: ''
-    });
+    handleShiftChange(emp, selectedDateKey, selectedShiftType === 'Night', '12');
 
     setAddEmployeeId('');
     setAddSearchQuery('');
     setShowAddPicker(false);
-  }, [addEmployeeId, addAdjustmentRecord, employees, gallerySliceKey, selectedDateKey, selectedShiftType]);
+  }, [addEmployeeId, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
+
+  const selectedDateIso = useMemo(() => {
+    const year = getUtc8Now().getFullYear();
+    return toIsoDateFromKey(year, selectedDateKey);
+  }, [selectedDateKey]);
+
+  const sliceAdjustments = useMemo(() => {
+    const isNight = selectedShiftType === 'Night';
+    return adjustments.filter(a => a.date === selectedDateIso && a.isNight === isNight);
+  }, [adjustments, selectedDateIso, selectedShiftType]);
+
+  const sliceOvertimeCount = useMemo(() => {
+    return sliceAdjustments.filter(a => a.adjustmentType === 'Overtime').length;
+  }, [sliceAdjustments]);
+
+  const sliceLeaveCount = useMemo(() => {
+    return sliceAdjustments.filter(a => a.adjustmentType === 'Leave').length;
+  }, [sliceAdjustments]);
+
+  // Last slice (previous day/night)
+  const lastSlice = useMemo(() => {
+    const lastShiftType: ShiftType = selectedShiftType === 'Day' ? 'Night' : 'Day';
+    const lastDateIso = selectedShiftType === 'Day' ? isoAddDays(selectedDateIso, -1) : selectedDateIso;
+    const lastDateKey = toDateKeyFromIso(lastDateIso);
+    return { lastShiftType, lastDateIso, lastDateKey };
+  }, [selectedShiftType, selectedDateIso]);
+
+  const lastScheduledIdSet = useMemo(() => {
+    const ids = new Set<string>();
+    for (const emp of employees) {
+      const shiftEntry = emp.shifts[lastSlice.lastDateKey];
+      const cellValue = lastSlice.lastShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
+      const parsed = parseInt(String(cellValue), 10);
+      if (Number.isFinite(parsed) && parsed > 0) ids.add(emp.id);
+    }
+    return ids;
+  }, [employees, lastSlice.lastDateKey, lastSlice.lastShiftType]);
+
+  const lastSliceEmployees = useMemo(() => {
+    const teamFiltered = selectedShift === 'All' ? employees : employees.filter(e => e.shiftTeam === selectedShift);
+    return teamFiltered.filter(e => lastScheduledIdSet.has(e.id));
+  }, [employees, selectedShift, lastScheduledIdSet]);
+
+  const lastSliceAdjustments = useMemo(() => {
+    const isNight = lastSlice.lastShiftType === 'Night';
+    const teamFiltered = selectedShift === 'All'
+      ? adjustments
+      : adjustments.filter(a => a.shiftTeam === selectedShift);
+    return teamFiltered.filter(a => a.date === lastSlice.lastDateIso && a.isNight === isNight);
+  }, [adjustments, selectedShift, lastSlice.lastDateIso, lastSlice.lastShiftType]);
+
+  const lastSliceOvertimeCount = useMemo(() => {
+    return lastSliceAdjustments.filter(a => a.adjustmentType === 'Overtime').length;
+  }, [lastSliceAdjustments]);
+
+  const lastSliceLeaveCount = useMemo(() => {
+    return lastSliceAdjustments.filter(a => a.adjustmentType === 'Leave').length;
+  }, [lastSliceAdjustments]);
+
+  const lastSliceInternalPlan = useMemo(() => {
+    return lastSliceEmployees.filter(e => e.indirectDirect === 'Direct').length;
+  }, [lastSliceEmployees]);
+
+  const lastSliceThirdPartyPlan = useMemo(() => {
+    return lastSliceEmployees.filter(e => e.indirectDirect === 'Indirect').length;
+  }, [lastSliceEmployees]);
+
+  const lastSliceInternalArrived = useMemo(() => {
+    const leaveIds = new Set(
+      lastSliceAdjustments
+        .filter(a => a.adjustmentType === 'Leave' && a.indirectDirect === 'Direct')
+        .map(a => a.employeeId)
+    );
+    const arrived = lastSliceEmployees.filter(e => e.indirectDirect === 'Direct' && !leaveIds.has(e.id)).length;
+    return arrived;
+  }, [lastSliceAdjustments, lastSliceEmployees]);
+
+  const lastSliceThirdPartyArrived = useMemo(() => {
+    const leaveIds = new Set(
+      lastSliceAdjustments
+        .filter(a => a.adjustmentType === 'Leave' && a.indirectDirect === 'Indirect')
+        .map(a => a.employeeId)
+    );
+    const arrived = lastSliceEmployees.filter(e => e.indirectDirect === 'Indirect' && !leaveIds.has(e.id)).length;
+    return arrived;
+  }, [lastSliceAdjustments, lastSliceEmployees]);
 
   return (
     // Layout: header + toolbar + table + adjustment panel
@@ -581,7 +689,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             color: dataSource === 'dataverse' ? '#2e7d32' : '#e65100',
             fontWeight: 500
           }}>
-            {dataSource === 'dataverse' ? '📊 Dataverse' : '📋 Mock Data'}
+            {dataSource === 'dataverse' ? `📊 ${t('attendance.dataSourceDataverse')}` : `📋 ${t('attendance.dataSourceMock')}`}
           </span>
           {/* Refresh button */}
           <button
@@ -601,7 +709,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             }}
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {loading ? 'Loading...' : 'Refresh'}
+            {loading ? t('attendance.loading') : t('attendance.refresh')}
           </button>
         </div>
       </div>
@@ -700,23 +808,22 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
           </div>
           {/* Confirm and Reset Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={() => setViewMode(prev => (prev === 'pivot' ? 'gallery' : 'pivot'))}
-              className='btn'
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 16px',
-                fontSize: '14px',
-                backgroundColor: '#f5f5f5',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                cursor: 'pointer'
-              }}
-            >
-              Switch View
-            </button>
+            <div className='nav-tabs' aria-label='Attendance view mode'>
+              <button
+                onClick={() => setViewMode('pivot')}
+                className={`nav-tab ${viewMode === 'pivot' ? 'active' : ''}`}
+                type='button'
+              >
+                {t('attendance.viewPivot')}
+              </button>
+              <button
+                onClick={() => setViewMode('gallery')}
+                className={`nav-tab ${viewMode === 'gallery' ? 'active' : ''}`}
+                type='button'
+              >
+                {t('attendance.viewGallery')}
+              </button>
+            </div>
             <button
               onClick={handleReset}
               disabled={!hasChanges}
@@ -757,58 +864,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
               }}
             >
               {saving ? <RefreshCw size={16} className='animate-spin' /> : <Check size={16} />}
-              {saving ? 'Saving...' : (t('attendance.confirm') || 'Confirm')}
+              {saving ? t('attendance.saving') : (t('attendance.confirm') || 'Confirm')}
             </button>
           </div>
         </div>
-
-        {viewMode === 'gallery' && (
-          <div style={{
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--border-color)',
-            background: '#fafafa',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px'
-          }}>
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-              {dates.flatMap(dateKey =>
-                (['Day', 'Night'] as const).map(shift => {
-                  const isSelected = selectedDateKey === dateKey && selectedShiftType === shift;
-                  return (
-                    <button
-                      key={`${dateKey}|${shift}`}
-                      onClick={() => {
-                        setSelectedDateKey(dateKey);
-                        setSelectedShiftType(shift);
-                      }}
-                      className={`btn ${isSelected ? 'btn-secondary' : 'btn-ghost'}`}
-                      style={{
-                        fontSize: '13px',
-                        padding: '8px 12px',
-                        backgroundColor: isSelected ? '#eff6ff' : 'transparent',
-                        color: isSelected ? 'var(--accent-blue)' : 'inherit',
-                        border: isSelected ? '1px solid var(--accent-blue)' : '1px solid transparent',
-                        borderRadius: '10px',
-                        whiteSpace: 'nowrap',
-                        minWidth: '92px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        lineHeight: 1.1
-                      }}
-                    >
-                      <span style={{ fontWeight: 700 }}>{dateKey}</span>
-                      <span style={{ fontSize: '11px', opacity: 0.85 }}>
-                        {shift === 'Day' ? t('attendance.day') : t('attendance.night')}
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
 
         {viewMode === 'pivot' ? (
           <div className='table-container' style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
@@ -944,162 +1003,475 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             </table>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              {galleryEmployees.length === 0 ? (
-                <div style={{ padding: '16px', color: 'var(--text-secondary)' }}>
-                  No employees in this date/shift view.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {galleryEmployees.map(emp => {
-                    const rowBg = getRowBackgroundColor(emp.shiftTeam);
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '260px 1fr',
+              flex: 1,
+              minHeight: 0,
+              background: 'white'
+            }}
+          >
+            {/* Sidebar: date + Day/Night list */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+                borderRight: '1px solid var(--border-color)'
+              }}
+            >
+              <div style={{ padding: '12px', borderBottom: '1px solid var(--border-color)' }}>
+                <input
+                  type='date'
+                  className='input'
+                  value={selectedDateIso}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (!value) return;
+                    const parts = value.split('-').map(Number);
+                    if (parts.length !== 3) return;
+                    const [, month, day] = parts;
+                    setSelectedDateKey(toDateKey(month, day));
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ overflowY: 'auto', padding: '6px 0' }}>
+                {dates.map(dateKey => {
+                  const todayHighlight = isToday(dateKey);
+                  const dateSelected = selectedDateKey === dateKey;
+
+                  const renderShiftButton = (shift: ShiftType) => {
+                    const selected = selectedDateKey === dateKey && selectedShiftType === shift;
+                    const Icon = shift === 'Day' ? Sun : Moon;
+                    const pillBg = shift === 'Day' ? '#48b6c8' : '#111827';
                     return (
-                      <div
-                        key={emp.id}
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '60px 140px 110px 90px 110px 90px 90px 110px',
-                          gap: '8px',
-                          alignItems: 'center',
-                          padding: '10px 16px',
-                          borderBottom: '1px solid #f5f5f5',
-                          background: rowBg
+                      <button
+                        key={`${dateKey}|${shift}`}
+                        type='button'
+                        onClick={() => {
+                          setSelectedDateKey(dateKey);
+                          setSelectedShiftType(shift);
                         }}
+                        className='btn'
+                        style={{
+                          flex: 1,
+                          justifyContent: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          borderRadius: '999px',
+                          background: pillBg,
+                          color: 'white',
+                          fontWeight: 800,
+                          letterSpacing: '0.5px',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          boxShadow: shift === 'Day' ? '0 10px 18px rgba(72, 182, 200, 0.22)' : '0 10px 18px rgba(17, 24, 39, 0.18)',
+                          opacity: selected ? 1 : 0.35,
+                          filter: selected ? 'none' : 'grayscale(10%)',
+                          minWidth: 0,
+                          whiteSpace: 'nowrap'
+                        }}
+                        aria-pressed={selected}
                       >
-                        <div style={{ color: '#666' }}>{emp.id}</div>
-                        <div style={{ fontWeight: 500 }}>{emp.name}</div>
-                        <div style={{ color: '#666' }}>{emp.role}</div>
-                        <div style={{ color: '#666' }}>{emp.indirectDirect}</div>
-                        <div style={{ color: '#666' }}>{emp.status}</div>
-                        <div style={{ color: '#666' }}>{emp.shiftTeam}</div>
-                        <div style={{ color: '#666' }}>{emp.gender}</div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          <button
-                            onClick={() => handleLeaveClick(emp)}
-                            className='btn'
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '13px',
-                              backgroundColor: '#fff3e0',
-                              color: '#e65100',
-                              border: '1px solid #ffcc80',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Leave
-                          </button>
-                        </div>
-                      </div>
+                        <Icon size={14} color='white' />
+                        <span style={{ fontSize: '13px' }}>{shift === 'Day' ? t('attendance.day') : t('attendance.night')}</span>
+                      </button>
                     );
-                  })}
-                </div>
-              )}
-            </div>
+                  };
 
-            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color)', background: '#fafafa' }}>
-              <button
-                onClick={() => setShowAddPicker(prev => !prev)}
-                className='btn'
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  backgroundColor: '#f5f5f5',
-                  border: '1px solid var(--border-color)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px'
-                }}
-              >
-                <span style={{ fontSize: '18px', lineHeight: 1 }}>+</span>
-                <span>Add worker to this shift</span>
-              </button>
-
-              {showAddPicker && (
-                <div style={{
-                  marginTop: '10px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '10px',
-                  background: 'white',
-                  padding: '12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px'
-                }}>
-                  <div style={{ position: 'relative' }}>
-                    <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-                    <input
-                      type='text'
-                      value={addSearchQuery}
-                      onChange={(e) => setAddSearchQuery(e.target.value)}
-                      placeholder='Search by ID or Name'
-                      className='input'
-                      style={{ paddingLeft: '36px', width: '100%' }}
-                    />
-                  </div>
-
-                  <div style={{
-                    maxHeight: '220px',
-                    overflowY: 'auto',
-                    border: '1px solid #f0f0f0',
-                    borderRadius: '8px'
-                  }}>
-                    {filteredAvailableEmployeesForGallery.length === 0 ? (
-                      <div style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                        No matching workers.
-                      </div>
-                    ) : (
-                      filteredAvailableEmployeesForGallery.map(emp => {
-                        const selected = addEmployeeId === emp.id;
-                        return (
-                          <button
-                            key={emp.id}
-                            onClick={() => setAddEmployeeId(emp.id)}
-                            className='btn'
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '10px 12px',
-                              border: 'none',
-                              borderBottom: '1px solid #f5f5f5',
-                              background: selected ? '#eff6ff' : 'transparent',
-                              color: selected ? 'var(--accent-blue)' : 'inherit',
-                              borderRadius: 0,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <div style={{ fontWeight: 600 }}>{emp.id}</div>
-                            <div style={{ fontSize: '12px', color: selected ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>{emp.name}</div>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={handleAddWorkerToGallery}
-                      disabled={!addEmployeeId}
-                      className='btn'
+                  return (
+                    <div
+                      key={dateKey}
                       style={{
-                        padding: '8px 14px',
-                        fontSize: '13px',
-                        backgroundColor: addEmployeeId ? '#4caf50' : '#f5f5f5',
-                        color: addEmployeeId ? '#fff' : '#999',
-                        border: `1px solid ${addEmployeeId ? '#4caf50' : '#e0e0e0'}`,
-                        cursor: addEmployeeId ? 'pointer' : 'not-allowed',
-                        opacity: addEmployeeId ? 1 : 0.6
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #f5f5f5',
+                        background: dateSelected ? '#f3f8ff' : (todayHighlight ? '#f8fafc' : 'transparent')
                       }}
                     >
-                      Add
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{dateKey}</div>
+                        {todayHighlight && (
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 10px',
+                              borderRadius: '999px',
+                              border: '1px solid #dbeafe',
+                              background: '#eff6ff',
+                              color: 'var(--accent-blue)',
+                              fontWeight: 700
+                            }}
+                          >
+                            {t('attendance.today')}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        {renderShiftButton('Day')}
+                        {renderShiftButton('Night')}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Main: cards + table */}
+            <div style={{ padding: '16px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className='grid grid-cols-4' style={{ gap: '16px' }}>
+                <div className='card' style={{ padding: '16px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.totalWorkers')}</div>
+                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{employees.length}</div>
+                </div>
+                <div className='card' style={{ padding: '16px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.scheduledSlice')}</div>
+                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{galleryEmployees.length}</div>
+                </div>
+                <div className='card' style={{ padding: '16px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.overtimeSlice')}</div>
+                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{sliceOvertimeCount}</div>
+                </div>
+                <div className='card' style={{ padding: '16px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.leaveSlice')}</div>
+                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{sliceLeaveCount}</div>
+                </div>
+              </div>
+
+              <div className='card' style={{ padding: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('attendance.lastColorShift')}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {lastSlice.lastDateKey} • {lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '12px' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.totalWorkers')}</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
+                      {selectedShift === 'All' ? employees.length : employees.filter(e => e.shiftTeam === selectedShift).length}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.actualArrivedPlanInternal')}</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
+                      {lastSliceInternalArrived}/{lastSliceInternalPlan}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.actualArrivedPlanThirdParty')}</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
+                      {lastSliceThirdPartyArrived}/{lastSliceThirdPartyPlan}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.overtimeWorkers')}</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>{lastSliceOvertimeCount}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.leaveWorkers')}</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>{lastSliceLeaveCount}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className='card' style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    flexWrap: 'wrap',
+                    background: '#fafafa'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '16px' }}>{t('attendance.allWorkers')}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {selectedDateKey} • {selectedShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <div style={{ position: 'relative' }}>
+                      <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
+                      <input
+                        type='text'
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder={t('attendance.quickSearch')}
+                        className='input'
+                        style={{ paddingLeft: '36px', width: '220px' }}
+                      />
+                    </div>
+
+                    <select
+                      value={selectedShift}
+                      onChange={(e) => setSelectedShift(e.target.value)}
+                      className='input'
+                      style={{ width: '160px', background: 'white' }}
+                    >
+                      {['All', 'Green', 'Blue', 'Orange', 'Yellow'].map(filter => (
+                        <option key={filter} value={filter}>
+                          {t(filterKeys[filter])}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button className='btn btn-secondary' type='button' disabled style={{ opacity: 0.7 }}>
+                      {t('attendance.export')}
+                    </button>
+                    <button
+                      className='btn btn-primary'
+                      type='button'
+                      onClick={() => setShowAddPicker(prev => !prev)}
+                    >
+                      {t('attendance.addWorker')}
                     </button>
                   </div>
                 </div>
-              )}
+
+                {showAddPicker && (
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', background: 'white' }}>
+                    <div style={{
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '10px',
+                      background: 'white',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px'
+                    }}>
+                      <div style={{ position: 'relative' }}>
+                        <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
+                        <input
+                          type='text'
+                          value={addSearchQuery}
+                          onChange={(e) => setAddSearchQuery(e.target.value)}
+                          placeholder={t('attendance.searchByIdOrName')}
+                          className='input'
+                          style={{ paddingLeft: '36px', width: '100%' }}
+                        />
+                      </div>
+
+                      <div style={{
+                        maxHeight: '220px',
+                        overflowY: 'auto',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: '8px'
+                      }}>
+                        {filteredAvailableEmployeesForGallery.length === 0 ? (
+                          <div style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                            {t('attendance.noMatchingWorkers')}
+                          </div>
+                        ) : (
+                          filteredAvailableEmployeesForGallery.map(emp => {
+                            const selected = addEmployeeId === emp.id;
+                            return (
+                              <button
+                                key={emp.id}
+                                onClick={() => setAddEmployeeId(emp.id)}
+                                className='btn'
+                                type='button'
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  padding: '10px 12px',
+                                  border: 'none',
+                                  borderBottom: '1px solid #f5f5f5',
+                                  background: selected ? '#eff6ff' : 'transparent',
+                                  color: selected ? 'var(--accent-blue)' : 'inherit',
+                                  borderRadius: 0,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <div style={{ fontWeight: 700 }}>{emp.id}</div>
+                                <div style={{ fontSize: '12px', color: selected ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>{emp.name}</div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                        <button
+                          onClick={() => {
+                            setShowAddPicker(false);
+                            setAddEmployeeId('');
+                            setAddSearchQuery('');
+                          }}
+                          className='btn btn-secondary'
+                          type='button'
+                        >
+                          {t('attendance.cancel')}
+                        </button>
+                        <button
+                          onClick={handleAddWorkerToGallery}
+                          disabled={!addEmployeeId}
+                          className='btn'
+                          type='button'
+                          style={{
+                            backgroundColor: addEmployeeId ? '#4caf50' : '#f5f5f5',
+                            color: addEmployeeId ? '#fff' : '#999',
+                            border: `1px solid ${addEmployeeId ? '#4caf50' : '#e0e0e0'}`,
+                            cursor: addEmployeeId ? 'pointer' : 'not-allowed',
+                            opacity: addEmployeeId ? 1 : 0.6
+                          }}
+                        >
+                          {t('attendance.add')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className='table-container' style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '120px' }}>{t('attendance.id')}</th>
+                        <th style={{ width: '260px' }}>{t('attendance.name')}</th>
+                        <th style={{ width: '120px' }}>{t('attendance.role')}</th>
+                        <th style={{ width: '120px' }}>{t('attendance.id_status')}</th>
+                        <th style={{ width: '120px' }}>{t('attendance.status')}</th>
+                        <th style={{ width: '120px' }}>{t('attendance.shift')}</th>
+                        <th style={{ width: '120px' }}>{t('attendance.gender')}</th>
+                        <th style={{ width: '140px' }}>{t('attendance.workingHour')}</th>
+                        <th style={{ width: '140px' }}>{t('attendance.actions')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {galleryEmployees.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                            {t('attendance.noEmployeesInSlice')}
+                          </td>
+                        </tr>
+                      ) : (
+                        galleryEmployees.map(emp => {
+                          const initials = emp.name
+                            .split(' ')
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map(part => part[0]?.toUpperCase())
+                            .join('') || emp.name.slice(0, 2).toUpperCase();
+                          const isNight = selectedShiftType === 'Night';
+                          const draftKey = `${gallerySliceKey}|${emp.id}`;
+                          const draft = galleryHourDrafts[draftKey];
+                          const shiftEntry = emp.shifts[selectedDateKey];
+                          const storedRaw = isNight ? (shiftEntry?.night || '') : (shiftEntry?.day || '');
+                          const storedParsed = parseInt(String(storedRaw), 10);
+                          const storedHours = Number.isFinite(storedParsed) && storedParsed > 0 ? String(storedParsed) : '';
+                          const displayValue = draft ? draft.value : (storedHours || '12');
+
+                          const year = getUtc8Now().getFullYear();
+                          const dateStr = toIsoDateFromKey(year, selectedDateKey);
+                          const leaveOn = adjustments.some(a =>
+                            a.employeeId === emp.id &&
+                            a.date === dateStr &&
+                            a.isNight === isNight &&
+                            a.adjustmentType === 'Leave'
+                          );
+                          return (
+                            <tr key={emp.id}>
+                              <td style={{ color: 'var(--text-secondary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                                {emp.id}
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <div
+                                    style={{
+                                      width: '32px',
+                                      height: '32px',
+                                      borderRadius: '999px',
+                                      border: '1px solid var(--border-color)',
+                                      background: 'white',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '12px',
+                                      fontWeight: 800,
+                                      color: 'var(--text-secondary)'
+                                    }}
+                                  >
+                                    {initials}
+                                  </div>
+                                  <div style={{ fontWeight: 600 }}>{emp.name}</div>
+                                </div>
+                              </td>
+                              <td style={{ color: 'var(--text-secondary)' }}>{emp.role}</td>
+                              <td style={{ color: 'var(--text-secondary)' }}>{emp.indirectDirect}</td>
+                              <td style={{ color: 'var(--text-secondary)' }}>{emp.status}</td>
+                              <td>
+                                <span className={`badge ${getShiftClass(emp.shiftTeam)}`}>{emp.shiftTeam}</span>
+                              </td>
+                              <td style={{ color: 'var(--text-secondary)' }}>{emp.gender}</td>
+                              <td>
+                                <input
+                                  type='number'
+                                  min={0}
+                                  step={1}
+                                  className='input'
+                                  value={displayValue}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setGalleryHourDrafts(prev => ({
+                                      ...prev,
+                                      [draftKey]: { value, touched: true }
+                                    }));
+                                  }}
+                                  onBlur={() => {
+                                    const current = galleryHourDrafts[draftKey];
+                                    if (!current?.touched) return;
+                                    const nextValue = String(parseInt(current.value, 10) || 0);
+                                    const prevValue = String(parseInt(String(storedRaw || '0'), 10) || 0);
+                                    if (nextValue === prevValue) {
+                                      setGalleryHourDrafts(prev => ({
+                                        ...prev,
+                                        [draftKey]: { value: displayValue, touched: false }
+                                      }));
+                                      return;
+                                    }
+
+                                    handleShiftChange(emp, selectedDateKey, isNight, nextValue);
+                                    setGalleryHourDrafts(prev => {
+                                      const { [draftKey]: _removed, ...rest } = prev;
+                                      return rest;
+                                    });
+                                  }}
+                                  style={{ width: '96px' }}
+                                />
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => toggleLeaveForEmployee(emp)}
+                                  className='btn'
+                                  type='button'
+                                  style={{
+                                    padding: '6px 12px',
+                                    fontSize: '13px',
+                                    backgroundColor: leaveOn ? 'rgba(255, 59, 48, 0.12)' : '#f5f5f5',
+                                    color: leaveOn ? 'var(--danger)' : 'var(--text-secondary)',
+                                    border: `1px solid ${leaveOn ? 'rgba(255, 59, 48, 0.35)' : 'var(--border-color)'}`,
+                                    cursor: 'pointer'
+                                  }}
+                                  aria-pressed={leaveOn}
+                                >
+                                  {t('adjustment.leave')}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         )}
