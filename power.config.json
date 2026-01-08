@@ -16,40 +16,6 @@
         "office365users"
       ],
       "dataSets": {}
-    },
-    "dbf59a58-bebf-4320-ba99-6ba2a5d443a4": {
-      "id": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
-      "displayName": "SharePoint",
-      "dataSources": [
-        "sharepointonline"
-      ],
-      "dataSets": {}
-    }
-  },
-  "databaseReferences": {
-    "default.cds": {
-      "state": "Configured",
-      "instanceUrl": "https://org196c3852.crm.dynamics.com/",
-      "webApiVersion": "v9.0",
-      "dataSources": {
-        "shifts": {
-          "entitySetName": "jia_shifts",
-          "logicalName": "jia_shift",
-          "isHidden": false
-        },
-        "adjustments": {
-          "entitySetName": "jia_adjustments",
-          "logicalName": "jia_adjustment",
-          "isHidden": false
-        },
-        "ll_attendances": {
-          "entitySetName": "jia_ll_attendances",
-          "logicalName": "jia_ll_attendance",
-          "isHidden": false
-        }
-      },
-      "version": "v9.0",
-      "environmentVariableName": ""
     }
   }
 }

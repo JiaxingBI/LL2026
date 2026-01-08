@@ -1,9 +1,7 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Search, Check, RotateCcw, RefreshCw, Sun, Moon } from 'lucide-react';
-import { mockEmployees, mockAdjustments } from '../data/mockData';
-import { Jia_ll_attendancesService } from '../generated/services/Jia_ll_attendancesService';
-import type { Jia_ll_attendances } from '../generated/models/Jia_ll_attendancesModel';
-import type { Employee, Adjustment, ShiftEntry } from '../types';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { Search, Check, RotateCcw, Sun, Moon } from 'lucide-react';
+import { createFourTablesDataSource } from '../data/fourTablesDataSource';
+import type { Employee, Adjustment } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -43,64 +41,20 @@ function toDateKeyFromIso(isoDate: string): string {
   return `${month}/${day}`;
 }
 
-// Convert a Dataverse row into the Employee shape that the UI expects
-function transformDataverseToEmployee(record: Jia_ll_attendances): Employee {
-  const id = record.jia_title || '' as Employee['id'];
-  const name = record.jia_field_1 || '' as Employee['name'];
-  const role = (record.jia_field_2 || 'TC.L1') as Employee['role'];
-  const indirectDirect = (record.jia_field_3 || 'Direct') as Employee['indirectDirect'];
-  const status = (record.jia_field_4 || 'Prod.') as Employee['status'];
-  const shiftTeam = (record.jia_field_5 || 'Green') as Employee['shiftTeam'];
-  const gender = (record.jia_field_6 || 'Male') as Employee['gender'];
-
-  // Deserialize shift-specific JSON (if it exists) into the shifts map
-  const shifts: Record<string, ShiftEntry> = {};
-  if (record.jia_field_5 && typeof record.jia_field_5 === 'string') {
-    try {
-      const parsedShifts = JSON.parse(record.jia_field_5);
-      Object.assign(shifts, parsedShifts);
-    } catch (e) {
-      console.warn('Failed to parse shifts:', e);
-    }
-  }
-
-  return {
-    id,
-    name,
-    role,
-    indirectDirect,
-    status,
-    shiftTeam,
-    gender,
-    shifts
-  };
-}
-
-function dedupeEmployeesById(employees: Employee[]): Employee[] {
-  const seen = new Set<string>();
-  const unique: Employee[] = [];
-  for (const emp of employees) {
-    if (seen.has(emp.id)) continue;
-    seen.add(emp.id);
-    unique.push(emp);
-  }
-  return unique;
-}
 
 interface AttendancePlanProps {
   isInitialized?: boolean;
 }
 
+const dataSource = createFourTablesDataSource(30);
+
 export default function AttendancePlan({ isInitialized = false }: AttendancePlanProps) {
   const { t } = useLanguage();
 
-  // State describing the current UI experience (loading/error/source)
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [dataSource, setDataSource] = useState<'dataverse' | 'mock'>('mock');
+  const planYear = dataSource.year;
   
-  const [employees, setEmployees] = useState<Employee[]>(mockEmployees);
-  const [adjustments, setAdjustments] = useState<Adjustment[]>(mockAdjustments);
+  const [employees, setEmployees] = useState<Employee[]>(() => dataSource.uiEmployees);
+  const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [selectedShift, setSelectedShift] = useState('All');
   const [filterNearDates, setFilterNearDates] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -111,6 +65,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   // Gallery slicer state: date + shift
   const [selectedDateKey, setSelectedDateKey] = useState(() => {
+    if (dataSource.dateKeys.length > 0) return dataSource.dateKeys[dataSource.dateKeys.length - 1];
     const nowUtc8 = getUtc8Now();
     return toDateKey(nowUtc8.getMonth() + 1, nowUtc8.getDate());
   });
@@ -122,68 +77,15 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [addEmployeeId, setAddEmployeeId] = useState<string>('');
   const [addSearchQuery, setAddSearchQuery] = useState<string>('');
   
-  // Track original Dataverse records for diffing on save
-  const originalRecordsRef = useRef<Map<string, Jia_ll_attendances>>(new Map());
-  
-  // Saving state
-  const [saving, setSaving] = useState(false);  
-  
   // Track saved state - filter uses this, display uses 'employees' with pending changes
-  const [savedEmployees, setSavedEmployees] = useState<Employee[]>(JSON.parse(JSON.stringify(mockEmployees)));
-  const [savedAdjustments, setSavedAdjustments] = useState<Adjustment[]>(JSON.parse(JSON.stringify(mockAdjustments)));
+  const [savedEmployees, setSavedEmployees] = useState<Employee[]>(() => JSON.parse(JSON.stringify(dataSource.uiEmployees)));
+  const [savedAdjustments, setSavedAdjustments] = useState<Adjustment[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Queries Dataverse using the generated service, maps the rows, and chooses whether to show mock data.
-  const loadFromDataverse = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await Jia_ll_attendancesService.getAll();
-      if (!result.success) {
-        setError(result.error?.message || 'Failed to load from Dataverse');
-        setDataSource('mock');
-        return;
-      }
-
-      if (!result.data) {
-        setError('Dataverse returned no data');
-        setDataSource('mock');
-        return;
-      }
-
-      // Store original records for later diffing when saving
-      originalRecordsRef.current.clear();
-      result.data.forEach(rec => {
-        const id = rec.jia_title || '';
-        if (id) originalRecordsRef.current.set(id, rec);
-      });
-      
-      const mapped = result.data.map(transformDataverseToEmployee);
-      const dvEmployees = dedupeEmployeesById(mapped);
-      console.log(`Retrieved ${result.data.length} records, showing ${dvEmployees.length} unique employees`);
-
-      if (dvEmployees.length > 0) {
-        setEmployees(dvEmployees);
-        setSavedEmployees(JSON.parse(JSON.stringify(dvEmployees)));
-        setDataSource('dataverse');
-      } else {
-        setDataSource('mock');
-      }
-    } catch (err: any) {
-      console.error('Failed to retrieve attendance:', err);
-      setError(err.message || 'Failed to connect to Dataverse');
-      setDataSource('mock');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Auto-load from Dataverse when initialized
   useEffect(() => {
-    if (isInitialized) {
-      loadFromDataverse();
-    }
-  }, [isInitialized, loadFromDataverse]);
+    // Connections removed; keep prop for compatibility.
+    void isInitialized;
+  }, [isInitialized]);
 
   // Debounce search input (300ms delay) for better performance
   useEffect(() => {
@@ -191,87 +93,13 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Save changes back to Dataverse (only modified records)
+  // Save changes locally (connections removed)
   const handleConfirm = useCallback(async () => {
-    if (dataSource !== 'dataverse') {
-      // Mock mode - just snapshot locally
-      setSavedEmployees(JSON.parse(JSON.stringify(employees)));
-      setSavedAdjustments(JSON.parse(JSON.stringify(adjustments)));
-      setHasChanges(false);
-      alert(t('attendance.changesSaved') || 'Changes saved successfully!');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    let successCount = 0;
-    let errorCount = 0;
-
-    try {
-      // Find changed employees by comparing with saved snapshot
-      for (const emp of employees) {
-        const saved = savedEmployees.find(s => s.id === emp.id);
-        if (!saved) continue;
-        
-        // Check if any field changed
-        const fieldsChanged = 
-          emp.name !== saved.name ||
-          emp.role !== saved.role ||
-          emp.indirectDirect !== saved.indirectDirect ||
-          emp.status !== saved.status ||
-          emp.shiftTeam !== saved.shiftTeam ||
-          emp.gender !== saved.gender ||
-          JSON.stringify(emp.shifts) !== JSON.stringify(saved.shifts);
-        
-        if (!fieldsChanged) continue;
-        
-        // Get the original Dataverse record to find the GUID
-        const original = originalRecordsRef.current.get(emp.id);
-        if (!original?.jia_ll_attendanceid) {
-          console.warn(`No original record found for ${emp.id}, skipping`);
-          continue;
-        }
-        
-        // Build update payload
-        const updatePayload: Partial<any> = {
-          jia_title: emp.id,
-          jia_field_1: emp.name,
-          jia_field_2: emp.role,
-          jia_field_3: emp.indirectDirect,
-          jia_field_4: emp.status,
-          jia_field_5: emp.shiftTeam,
-          jia_field_6: emp.gender,
-          // Could also save shifts as JSON if needed
-        };
-        
-        try {
-          await Jia_ll_attendancesService.update(original.jia_ll_attendanceid, updatePayload);
-          successCount++;
-        } catch (err) {
-          console.error(`Failed to update ${emp.id}:`, err);
-          errorCount++;
-        }
-      }
-      
-      // Update saved snapshot
-      setSavedEmployees(JSON.parse(JSON.stringify(employees)));
-      setSavedAdjustments(JSON.parse(JSON.stringify(adjustments)));
-      setHasChanges(false);
-      
-      if (errorCount > 0) {
-        alert(`Saved ${successCount} records, ${errorCount} failed.`);
-      } else if (successCount > 0) {
-        alert(`Successfully saved ${successCount} records!`);
-      } else {
-        alert(t('attendance.noChangesToSave'));
-      }
-    } catch (err: any) {
-      console.error('Save failed:', err);
-      setError(err.message || 'Failed to save changes');
-    } finally {
-      setSaving(false);
-    }
-  }, [employees, savedEmployees, adjustments, dataSource, t]);
+    setSavedEmployees(JSON.parse(JSON.stringify(employees)));
+    setSavedAdjustments(JSON.parse(JSON.stringify(adjustments)));
+    setHasChanges(false);
+    alert(t('attendance.changesSaved') || 'Changes saved successfully!');
+  }, [employees, adjustments, t]);
 
   // Revert all pending edits back to the last confirmed snapshot (reset button logic)
   const handleReset = useCallback(() => {
@@ -370,28 +198,18 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setHasChanges(true);
   }, []);
 
-  // Build every calendar date used by the schedule grid (Jan 1 – Dec 31)
   const allDates = useMemo(() => {
-    const year = new Date().getFullYear();
-    const dates: string[] = [];
-    for (let month = 0; month < 12; month++) {
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
-      for (let day = 1; day <= daysInMonth; day++) {
-        dates.push(`${month + 1}/${day}`);
-      }
-    }
-    return dates;
+    return dataSource.dateKeys.length > 0 ? dataSource.dateKeys : [];
   }, []);
 
   // Optional date window filter; controlled by the near-dates toggle
   // When filterNearDates is ON: show ~14 days around today
   // When filterNearDates is OFF: show current month ± 1 month (~90 days) to prevent performance issues
   const baseDateForWindow = useMemo(() => {
-    const year = getUtc8Now().getFullYear();
     if (viewMode !== 'gallery') return new Date();
     const [month, day] = selectedDateKey.split('/').map(Number);
     if (!month || !day) return new Date();
-    return new Date(year, month - 1, day);
+    return new Date(planYear, month - 1, day);
   }, [viewMode, selectedDateKey]);
 
   const filteredDates = useMemo(() => {
@@ -424,9 +242,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   useEffect(() => {
     if (dates.length === 0) return;
     if (!dates.includes(selectedDateKey)) {
-      const nowUtc8 = getUtc8Now();
-      const defaultKey = toDateKey(nowUtc8.getMonth() + 1, nowUtc8.getDate());
-      setSelectedDateKey(dates.includes(defaultKey) ? defaultKey : dates[0]);
+      setSelectedDateKey(dates[0]);
     }
   }, [dates, selectedDateKey]);
 
@@ -527,8 +343,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   }, [gallerySliceKey]);
 
   const handleLeaveClick = useCallback((emp: Employee) => {
-    const year = getUtc8Now().getFullYear();
-    const dateStr = toIsoDateFromKey(year, selectedDateKey);
+    const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
     const shiftEntry = emp.shifts[selectedDateKey];
     const originalValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
     const originalHours = parseInt(originalValue) || 0;
@@ -549,11 +364,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       reason: 'Leave',
       comments: ''
     });
-  }, [addAdjustmentRecord, selectedDateKey, selectedShiftType]);
+  }, [addAdjustmentRecord, planYear, selectedDateKey, selectedShiftType]);
 
   const toggleLeaveForEmployee = useCallback((emp: Employee) => {
-    const year = getUtc8Now().getFullYear();
-    const dateStr = toIsoDateFromKey(year, selectedDateKey);
+    const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
     const isNight = selectedShiftType === 'Night';
 
     const existing = adjustments.find(a =>
@@ -570,7 +384,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     }
 
     handleLeaveClick(emp);
-  }, [adjustments, handleLeaveClick, selectedDateKey, selectedShiftType]);
+  }, [adjustments, handleLeaveClick, planYear, selectedDateKey, selectedShiftType]);
 
   const handleAddWorkerToGallery = useCallback(() => {
     if (!addEmployeeId) return;
@@ -585,8 +399,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   }, [addEmployeeId, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
 
   const selectedDateIso = useMemo(() => {
-    const year = getUtc8Now().getFullYear();
-    return toIsoDateFromKey(year, selectedDateKey);
+    return toIsoDateFromKey(planYear, selectedDateKey);
   }, [selectedDateKey]);
 
   const sliceAdjustments = useMemo(() => {
@@ -602,13 +415,62 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return sliceAdjustments.filter(a => a.adjustmentType === 'Leave').length;
   }, [sliceAdjustments]);
 
-  // Last slice (previous day/night)
+  // Last slice (previous working shift for the same ShiftTeam; skip rest days)
   const lastSlice = useMemo(() => {
-    const lastShiftType: ShiftType = selectedShiftType === 'Day' ? 'Night' : 'Day';
-    const lastDateIso = selectedShiftType === 'Day' ? isoAddDays(selectedDateIso, -1) : selectedDateIso;
-    const lastDateKey = toDateKeyFromIso(lastDateIso);
-    return { lastShiftType, lastDateIso, lastDateKey };
-  }, [selectedShiftType, selectedDateIso]);
+    const fallbackLastShiftType: ShiftType = selectedShiftType === 'Day' ? 'Night' : 'Day';
+    const fallbackLastDateIso = selectedShiftType === 'Day' ? isoAddDays(selectedDateIso, -1) : selectedDateIso;
+    const fallbackLastDateKey = toDateKeyFromIso(fallbackLastDateIso);
+
+    // If no specific team is selected, keep the original behaviour.
+    if (selectedShift === 'All') {
+      return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+    }
+
+    const teamEmployees = employees.filter(e => e.shiftTeam === selectedShift);
+    const representative = teamEmployees[0];
+    if (!representative) {
+      return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+    }
+
+    const allKeys = dataSource.dateKeys.length > 0 ? dataSource.dateKeys : allDates;
+    const selectedIndex = allKeys.indexOf(selectedDateKey);
+    if (selectedIndex < 0) {
+      return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+    }
+
+    const getHours = (dateKey: string, shift: ShiftType): number => {
+      const entry = representative.shifts[dateKey];
+      const value = shift === 'Day' ? (entry?.day || '') : (entry?.night || '');
+      const parsed = parseInt(String(value), 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    // If user is viewing Night, check same-date Day first (Day is earlier within the same date).
+    if (selectedShiftType === 'Night') {
+      const dayHours = getHours(selectedDateKey, 'Day');
+      if (dayHours > 0) {
+        const iso = dataSource.dateKeyToIso[selectedDateKey] ?? toIsoDateFromKey(planYear, selectedDateKey);
+        return { lastShiftType: 'Day' as const, lastDateIso: iso, lastDateKey: selectedDateKey };
+      }
+    }
+
+    // Scan backwards by date; for each date, Night is later than Day.
+    for (let i = selectedIndex - 1; i >= 0; i--) {
+      const dateKey = allKeys[i];
+      const nightHours = getHours(dateKey, 'Night');
+      if (nightHours > 0) {
+        const iso = dataSource.dateKeyToIso[dateKey] ?? toIsoDateFromKey(planYear, dateKey);
+        return { lastShiftType: 'Night' as const, lastDateIso: iso, lastDateKey: dateKey };
+      }
+      const dayHours = getHours(dateKey, 'Day');
+      if (dayHours > 0) {
+        const iso = dataSource.dateKeyToIso[dateKey] ?? toIsoDateFromKey(planYear, dateKey);
+        return { lastShiftType: 'Day' as const, lastDateIso: iso, lastDateKey: dateKey };
+      }
+    }
+
+    return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+  }, [selectedShiftType, selectedDateIso, selectedDateKey, selectedShift, employees, planYear, allDates]);
 
   const lastScheduledIdSet = useMemo(() => {
     const ids = new Set<string>();
@@ -672,7 +534,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   return (
     // Layout: header + toolbar + table + adjustment panel
-    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', height: '100%', minHeight: 0 }}>
+    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', height: '100%', minHeight: 0 }}>
       {/* Header */}
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
@@ -680,53 +542,18 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
           <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{t('attendance.subtitle')}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Data source indicator */}
-          <span style={{ 
-            fontSize: '12px', 
-            padding: '4px 10px', 
+          <span style={{
+            fontSize: '12px',
+            padding: '4px 10px',
             borderRadius: '12px',
-            background: dataSource === 'dataverse' ? '#e8f5e9' : '#fff3e0',
-            color: dataSource === 'dataverse' ? '#2e7d32' : '#e65100',
+            background: '#fff3e0',
+            color: '#e65100',
             fontWeight: 500
           }}>
-            {dataSource === 'dataverse' ? `📊 ${t('attendance.dataSourceDataverse')}` : `📋 ${t('attendance.dataSourceMock')}`}
+            {`📋 ${t('attendance.dataSourceMock')}`}
           </span>
-          {/* Refresh button */}
-          <button
-            onClick={loadFromDataverse}
-            disabled={loading}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              fontSize: '13px',
-              backgroundColor: '#f5f5f5',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '6px',
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {loading ? t('attendance.loading') : t('attendance.refresh')}
-          </button>
         </div>
       </div>
-
-      {/* Error message */}
-      {error && (
-        <div style={{ 
-          padding: '12px 16px', 
-          background: '#fef2f2', 
-          borderRadius: '8px', 
-          color: '#ef4444',
-          fontSize: '14px',
-          flexShrink: 0
-        }}>
-          ⚠️ {error}
-        </div>
-      )}
 
       {/* Schedule Editor */}
       <div className='card' style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
@@ -847,7 +674,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             </button>
             <button
               onClick={handleConfirm}
-              disabled={!hasChanges || saving}
+              disabled={!hasChanges}
               className='btn'
               style={{
                 display: 'flex',
@@ -855,16 +682,16 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                 gap: '6px',
                 padding: '8px 16px',
                 fontSize: '14px',
-                backgroundColor: hasChanges && !saving ? '#4caf50' : '#f5f5f5',
-                color: hasChanges && !saving ? '#fff' : '#999',
-                border: `1px solid ${hasChanges && !saving ? '#4caf50' : '#e0e0e0'}`,
-                cursor: hasChanges && !saving ? 'pointer' : 'not-allowed',
-                opacity: hasChanges && !saving ? 1 : 0.6,
+                backgroundColor: hasChanges ? '#4caf50' : '#f5f5f5',
+                color: hasChanges ? '#fff' : '#999',
+                border: `1px solid ${hasChanges ? '#4caf50' : '#e0e0e0'}`,
+                cursor: hasChanges ? 'pointer' : 'not-allowed',
+                opacity: hasChanges ? 1 : 0.6,
                 transition: 'all 0.2s ease'
               }}
             >
-              {saving ? <RefreshCw size={16} className='animate-spin' /> : <Check size={16} />}
-              {saving ? t('attendance.saving') : (t('attendance.confirm') || 'Confirm')}
+              <Check size={16} />
+              {t('attendance.confirm') || 'Confirm'}
             </button>
           </div>
         </div>
@@ -1119,34 +946,34 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             </div>
 
             {/* Main: cards + table */}
-            <div style={{ padding: '16px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className='grid grid-cols-4' style={{ gap: '16px' }}>
-                <div className='card' style={{ padding: '16px' }}>
+            <div style={{ padding: '12px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 220px))', gap: '12px' }}>
+                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.totalWorkers')}</div>
-                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{employees.length}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{employees.length}</div>
                 </div>
-                <div className='card' style={{ padding: '16px' }}>
+                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.scheduledSlice')}</div>
-                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{galleryEmployees.length}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{galleryEmployees.length}</div>
                 </div>
-                <div className='card' style={{ padding: '16px' }}>
+                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.overtimeSlice')}</div>
-                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{sliceOvertimeCount}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{sliceOvertimeCount}</div>
                 </div>
-                <div className='card' style={{ padding: '16px' }}>
+                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.leaveSlice')}</div>
-                  <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1 }}>{sliceLeaveCount}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{sliceLeaveCount}</div>
                 </div>
               </div>
 
-              <div className='card' style={{ padding: '16px' }}>
+              <div className='card' style={{ padding: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('attendance.lastColorShift')}</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                     {lastSlice.lastDateKey} • {lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}
                   </div>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
                   <div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.totalWorkers')}</div>
                     <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
@@ -1368,8 +1195,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                           const storedHours = Number.isFinite(storedParsed) && storedParsed > 0 ? String(storedParsed) : '';
                           const displayValue = draft ? draft.value : (storedHours || '12');
 
-                          const year = getUtc8Now().getFullYear();
-                          const dateStr = toIsoDateFromKey(year, selectedDateKey);
+                          const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
                           const leaveOn = adjustments.some(a =>
                             a.employeeId === emp.id &&
                             a.date === dateStr &&

@@ -4,18 +4,8 @@
  */
 
 // Models
-export * as AttendancePlanModel from './models/AttendancePlanModel';
 export * as CommonModels from './models/CommonModels';
-export * as Jia_adjustmentsModel from './models/Jia_adjustmentsModel';
-export * as Jia_ll_attendancesModel from './models/Jia_ll_attendancesModel';
-export * as Jia_shiftsModel from './models/Jia_shiftsModel';
 export * as Office365UsersModel from './models/Office365UsersModel';
-export * as SharePointModel from './models/SharePointModel';
 
 // Services
-export * from './services/AttendancePlanService';
-export * from './services/Jia_adjustmentsService';
-export * from './services/Jia_ll_attendancesService';
-export * from './services/Jia_shiftsService';
 export * from './services/Office365UsersService';
-export * from './services/SharePointService';
