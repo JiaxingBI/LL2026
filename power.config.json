@@ -17,5 +17,41 @@
       ],
       "dataSets": {}
     }
+  },
+  "databaseReferences": {
+    "default.cds": {
+      "state": "Configured",
+      "instanceUrl": "https://org196c3852.crm.dynamics.com/",
+      "webApiVersion": "v9.0",
+      "dataSources": {
+        "accounts": {
+          "entitySetName": "accounts",
+          "logicalName": "account",
+          "isHidden": false
+        },
+        "ll_demployees": {
+          "entitySetName": "jia_ll_demployees",
+          "logicalName": "jia_ll_demployee",
+          "isHidden": false
+        },
+        "ll_dshiftgroups": {
+          "entitySetName": "jia_ll_dshiftgroups",
+          "logicalName": "jia_ll_dshiftgroup",
+          "isHidden": false
+        },
+        "ll_dshiftplans": {
+          "entitySetName": "jia_ll_dshiftplans",
+          "logicalName": "jia_ll_dshiftplan",
+          "isHidden": false
+        },
+        "ll_fattendancerecords": {
+          "entitySetName": "jia_ll_fattendancereocrds",
+          "logicalName": "jia_ll_fattendancereocrd",
+          "isHidden": false
+        }
+      },
+      "version": "v9.0",
+      "environmentVariableName": ""
+    }
   }
 }

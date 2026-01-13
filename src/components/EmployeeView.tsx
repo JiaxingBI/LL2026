@@ -1,14 +1,28 @@
 import { useState, useMemo } from 'react';
-import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ChevronDown, MessageCircle } from 'lucide-react';
-import { mockAssemblyLines, mockEmployees } from '../data/mockData';
+import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ChevronDown, MessageCircle, Loader2 } from 'lucide-react';
+import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { Employee, AssemblyLine } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
-export default function EmployeeView() {
+// Default assembly lines structure (these could also come from Dataverse in the future)
+const defaultAssemblyLines: AssemblyLine[] = [
+  { id: 'L1', name: 'L1 - Assembly Line 1', capacity: 8, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L2', name: 'L2 - Assembly Line 2', capacity: 10, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L3', name: 'L3 - Assembly Line 3', capacity: 6, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L4', name: 'L4 - Assembly Line 4', capacity: 12, currentWorkers: 0, assignedWorkers: [] },
+];
+
+interface EmployeeViewProps {
+  isInitialized?: boolean;
+}
+
+export default function EmployeeView({ isInitialized = true }: EmployeeViewProps) {
   const { t, language } = useLanguage();
+  const { employees, isLoading, error } = useDataverseEmployees(isInitialized);
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
-  const [lines] = useState<AssemblyLine[]>(mockAssemblyLines);
+  const [lines] = useState<AssemblyLine[]>(defaultAssemblyLines);
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [highlightedEmployeeId, setHighlightedEmployeeId] = useState<string | null>(null);
 
@@ -34,7 +48,7 @@ export default function EmployeeView() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const employee = mockEmployees.find(emp => 
+    const employee = employees.find(emp => 
       emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       emp.id === searchQuery
     );
@@ -59,6 +73,33 @@ export default function EmployeeView() {
     if (current === capacity) return 'var(--success)';
     return 'var(--warning)';
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', background: '#F5F5F7' }}>
+        <Loader2 size={48} style={{ animation: 'spin 1s linear infinite' }} />
+        <p style={{ color: 'var(--text-secondary)' }}>{t('common.loading') || 'Loading employees from Dataverse...'}</p>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', padding: '24px', background: '#F5F5F7' }}>
+        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.error') || 'Error loading data'}</div>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          style={{ padding: '8px 16px', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+        >
+          {t('common.retry') || 'Retry'}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh', height: '100%', background: '#F5F5F7' }}>
@@ -201,7 +242,7 @@ export default function EmployeeView() {
                     <div 
                       key={worker.employeeId} 
                       onClick={() => {
-                        const emp = mockEmployees.find(e => e.id === worker.employeeId);
+                        const emp = employees.find(e => e.id === worker.employeeId);
                         if (emp) {
                           setSelectedEmployee(emp);
                           setHighlightedEmployeeId(emp.id);

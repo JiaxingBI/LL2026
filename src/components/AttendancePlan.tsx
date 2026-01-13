@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, Check, RotateCcw, Sun, Moon } from 'lucide-react';
-import { createFourTablesDataSource } from '../data/fourTablesDataSource';
+import { Search, Check, RotateCcw, Sun, Moon, Loader2 } from 'lucide-react';
+import { fetchDataverseData, transformDataverseData, type TransformedData } from '../data/dataverseLoader';
 import type { Employee, Adjustment } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -46,14 +46,17 @@ interface AttendancePlanProps {
   isInitialized?: boolean;
 }
 
-const dataSource = createFourTablesDataSource(30);
-
 export default function AttendancePlan({ isInitialized = false }: AttendancePlanProps) {
   const { t } = useLanguage();
 
-  const planYear = dataSource.year;
+  // Loading and error states for Dataverse
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [dataverseData, setDataverseData] = useState<TransformedData | null>(null);
+
+  const planYear = dataverseData?.year ?? new Date().getFullYear();
   
-  const [employees, setEmployees] = useState<Employee[]>(() => dataSource.uiEmployees);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [selectedShift, setSelectedShift] = useState('All');
   const [filterNearDates, setFilterNearDates] = useState(true);
@@ -65,7 +68,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   // Gallery slicer state: date + shift
   const [selectedDateKey, setSelectedDateKey] = useState(() => {
-    if (dataSource.dateKeys.length > 0) return dataSource.dateKeys[dataSource.dateKeys.length - 1];
     const nowUtc8 = getUtc8Now();
     return toDateKey(nowUtc8.getMonth() + 1, nowUtc8.getDate());
   });
@@ -74,17 +76,59 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   // Gallery is a view over the same schedule grid used by Pivot
   const [galleryHourDrafts, setGalleryHourDrafts] = useState<Record<string, { value: string; touched: boolean }>>({});
   const [showAddPicker, setShowAddPicker] = useState(false);
-  const [addEmployeeId, setAddEmployeeId] = useState<string>('');
+  const [addEmployeeIds, setAddEmployeeIds] = useState<Set<string>>(new Set());
   const [addSearchQuery, setAddSearchQuery] = useState<string>('');
+  const [addTeamFilter, setAddTeamFilter] = useState<'All' | 'Green' | 'Blue' | 'Orange' | 'Yellow'>('All');
+  // Selection state for delete functionality in the table
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   
   // Track saved state - filter uses this, display uses 'employees' with pending changes
-  const [savedEmployees, setSavedEmployees] = useState<Employee[]>(() => JSON.parse(JSON.stringify(dataSource.uiEmployees)));
+  const [savedEmployees, setSavedEmployees] = useState<Employee[]>([]);
   const [savedAdjustments, setSavedAdjustments] = useState<Adjustment[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // Fetch data from Dataverse when SDK is initialized
   useEffect(() => {
-    // Connections removed; keep prop for compatibility.
-    void isInitialized;
+    if (!isInitialized) {
+      setLoadError('Power Platform SDK is not initialized yet.');
+      setIsLoading(false);
+      return;
+    }
+
+    const loadDataverseData = async () => {
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        
+        const rawData = await fetchDataverseData();
+        const transformed = transformDataverseData(rawData);
+        
+        setDataverseData(transformed);
+        setEmployees(transformed.employees);
+        setSavedEmployees(JSON.parse(JSON.stringify(transformed.employees)));
+        
+        // Update selected date key if we have dates from Dataverse
+        if (transformed.dateKeys.length > 0) {
+          setSelectedDateKey(transformed.dateKeys[transformed.dateKeys.length - 1]);
+        }
+        
+        console.log('Dataverse data loaded:', {
+          employees: transformed.employees.length,
+          dateKeys: transformed.dateKeys.length,
+          rawEmployees: rawData.employees.length,
+          rawShiftGroups: rawData.shiftGroups.length,
+          rawShiftPlans: rawData.shiftPlans.length,
+          rawAttendanceRecords: rawData.attendanceRecords.length
+        });
+      } catch (error) {
+        console.error('Failed to load Dataverse data:', error);
+        setLoadError(error instanceof Error ? error.message : 'Failed to load data from Dataverse');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadDataverseData();
   }, [isInitialized]);
 
   // Debounce search input (300ms delay) for better performance
@@ -199,8 +243,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   }, []);
 
   const allDates = useMemo(() => {
-    return dataSource.dateKeys.length > 0 ? dataSource.dateKeys : [];
-  }, []);
+    return dataverseData?.dateKeys?.length ? dataverseData.dateKeys : [];
+  }, [dataverseData]);
 
   // Optional date window filter; controlled by the near-dates toggle
   // When filterNearDates is ON: show ~14 days around today
@@ -323,11 +367,12 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   const filteredAvailableEmployeesForGallery = useMemo(() => {
     const query = addSearchQuery.toLowerCase().trim();
-    if (!query) return availableEmployeesForGallery;
     return availableEmployeesForGallery.filter(emp => {
+      if (addTeamFilter !== 'All' && emp.shiftTeam !== addTeamFilter) return false;
+      if (!query) return true;
       return emp.id.toLowerCase().includes(query) || emp.name.toLowerCase().includes(query);
     });
-  }, [availableEmployeesForGallery, addSearchQuery]);
+  }, [availableEmployeesForGallery, addSearchQuery, addTeamFilter]);
 
   const addAdjustmentRecord = useCallback((payload: Omit<Adjustment, 'id'>) => {
     const record: Adjustment = {
@@ -386,17 +431,80 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     handleLeaveClick(emp);
   }, [adjustments, handleLeaveClick, planYear, selectedDateKey, selectedShiftType]);
 
-  const handleAddWorkerToGallery = useCallback(() => {
-    if (!addEmployeeId) return;
-    const emp = employees.find(e => e.id === addEmployeeId);
-    if (!emp) return;
+  // Add multiple workers to the gallery (supports multi-select)
+  const handleAddWorkersToGallery = useCallback(() => {
+    if (addEmployeeIds.size === 0) return;
+    
+    addEmployeeIds.forEach(empId => {
+      const emp = employees.find(e => e.id === empId);
+      if (emp) {
+        handleShiftChange(emp, selectedDateKey, selectedShiftType === 'Night', '12');
+      }
+    });
 
-    handleShiftChange(emp, selectedDateKey, selectedShiftType === 'Night', '12');
-
-    setAddEmployeeId('');
+    setAddEmployeeIds(new Set());
     setAddSearchQuery('');
+    setAddTeamFilter('All');
     setShowAddPicker(false);
-  }, [addEmployeeId, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
+  }, [addEmployeeIds, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
+
+  // Toggle selection for add worker picker
+  const toggleAddEmployeeSelection = useCallback((empId: string) => {
+    setAddEmployeeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(empId)) {
+        next.delete(empId);
+      } else {
+        next.add(empId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Delete selected workers from the current slice (remove their hours)
+  const handleDeleteSelectedWorkers = useCallback(() => {
+    if (selectedRowIds.size === 0) return;
+    
+    selectedRowIds.forEach(empId => {
+      const emp = employees.find(e => e.id === empId);
+      if (emp) {
+        // Set hours to 0 to remove from slice
+        handleShiftChange(emp, selectedDateKey, selectedShiftType === 'Night', '0');
+      }
+    });
+    
+    setSelectedRowIds(new Set());
+    setHasChanges(true);
+  }, [selectedRowIds, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
+
+  // Toggle row selection for delete
+  const toggleRowSelection = useCallback((empId: string) => {
+    setSelectedRowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(empId)) {
+        next.delete(empId);
+      } else {
+        next.add(empId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Select/deselect all rows
+  const toggleSelectAll = useCallback(() => {
+    if (selectedRowIds.size === galleryEmployees.length) {
+      setSelectedRowIds(new Set());
+    } else {
+      setSelectedRowIds(new Set(galleryEmployees.map(e => e.id)));
+    }
+  }, [selectedRowIds, galleryEmployees]);
+
+  const closeAddWorkerModal = useCallback(() => {
+    setShowAddPicker(false);
+    setAddEmployeeIds(new Set());
+    setAddSearchQuery('');
+    setAddTeamFilter('All');
+  }, []);
 
   const selectedDateIso = useMemo(() => {
     return toIsoDateFromKey(planYear, selectedDateKey);
@@ -415,27 +523,52 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return sliceAdjustments.filter(a => a.adjustmentType === 'Leave').length;
   }, [sliceAdjustments]);
 
-  // Last slice (previous working shift for the same ShiftTeam; skip rest days)
+  // Detect which team is scheduled in the current slice (auto-detect from scheduled workers)
+  const currentSliceTeam = useMemo(() => {
+    // Get all employees scheduled in the current slice
+    const scheduledEmps = employees.filter(emp => scheduledIdSet.has(emp.id));
+    if (scheduledEmps.length === 0) return null;
+    
+    // Find the most common team among scheduled employees
+    const teamCounts: Record<string, number> = {};
+    for (const emp of scheduledEmps) {
+      teamCounts[emp.shiftTeam] = (teamCounts[emp.shiftTeam] || 0) + 1;
+    }
+    
+    // Return the team with most scheduled workers
+    let maxTeam: string | null = null;
+    let maxCount = 0;
+    for (const [team, count] of Object.entries(teamCounts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        maxTeam = team;
+      }
+    }
+    return maxTeam;
+  }, [employees, scheduledIdSet]);
+
+  // Last slice (previous working shift for the auto-detected team from current slice)
   const lastSlice = useMemo(() => {
     const fallbackLastShiftType: ShiftType = selectedShiftType === 'Day' ? 'Night' : 'Day';
     const fallbackLastDateIso = selectedShiftType === 'Day' ? isoAddDays(selectedDateIso, -1) : selectedDateIso;
     const fallbackLastDateKey = toDateKeyFromIso(fallbackLastDateIso);
+    const fallbackResult = { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey, lastTeam: currentSliceTeam };
 
-    // If no specific team is selected, keep the original behaviour.
-    if (selectedShift === 'All') {
-      return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+    // Use auto-detected team from current slice
+    if (!currentSliceTeam) {
+      return fallbackResult;
     }
 
-    const teamEmployees = employees.filter(e => e.shiftTeam === selectedShift);
+    const teamEmployees = employees.filter(e => e.shiftTeam === currentSliceTeam);
     const representative = teamEmployees[0];
     if (!representative) {
-      return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+      return fallbackResult;
     }
 
-    const allKeys = dataSource.dateKeys.length > 0 ? dataSource.dateKeys : allDates;
+    const allKeys = allDates;
     const selectedIndex = allKeys.indexOf(selectedDateKey);
     if (selectedIndex < 0) {
-      return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
+      return fallbackResult;
     }
 
     const getHours = (dateKey: string, shift: ShiftType): number => {
@@ -449,8 +582,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     if (selectedShiftType === 'Night') {
       const dayHours = getHours(selectedDateKey, 'Day');
       if (dayHours > 0) {
-        const iso = dataSource.dateKeyToIso[selectedDateKey] ?? toIsoDateFromKey(planYear, selectedDateKey);
-        return { lastShiftType: 'Day' as const, lastDateIso: iso, lastDateKey: selectedDateKey };
+        const iso = toIsoDateFromKey(planYear, selectedDateKey);
+        return { lastShiftType: 'Day' as const, lastDateIso: iso, lastDateKey: selectedDateKey, lastTeam: currentSliceTeam };
       }
     }
 
@@ -459,18 +592,18 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       const dateKey = allKeys[i];
       const nightHours = getHours(dateKey, 'Night');
       if (nightHours > 0) {
-        const iso = dataSource.dateKeyToIso[dateKey] ?? toIsoDateFromKey(planYear, dateKey);
-        return { lastShiftType: 'Night' as const, lastDateIso: iso, lastDateKey: dateKey };
+        const iso = toIsoDateFromKey(planYear, dateKey);
+        return { lastShiftType: 'Night' as const, lastDateIso: iso, lastDateKey: dateKey, lastTeam: currentSliceTeam };
       }
       const dayHours = getHours(dateKey, 'Day');
       if (dayHours > 0) {
-        const iso = dataSource.dateKeyToIso[dateKey] ?? toIsoDateFromKey(planYear, dateKey);
-        return { lastShiftType: 'Day' as const, lastDateIso: iso, lastDateKey: dateKey };
+        const iso = toIsoDateFromKey(planYear, dateKey);
+        return { lastShiftType: 'Day' as const, lastDateIso: iso, lastDateKey: dateKey, lastTeam: currentSliceTeam };
       }
     }
 
-    return { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey };
-  }, [selectedShiftType, selectedDateIso, selectedDateKey, selectedShift, employees, planYear, allDates]);
+    return fallbackResult;
+  }, [selectedShiftType, selectedDateIso, selectedDateKey, currentSliceTeam, employees, planYear, allDates]);
 
   const lastScheduledIdSet = useMemo(() => {
     const ids = new Set<string>();
@@ -484,17 +617,19 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   }, [employees, lastSlice.lastDateKey, lastSlice.lastShiftType]);
 
   const lastSliceEmployees = useMemo(() => {
-    const teamFiltered = selectedShift === 'All' ? employees : employees.filter(e => e.shiftTeam === selectedShift);
+    // Use the auto-detected team from current slice
+    const teamFiltered = currentSliceTeam ? employees.filter(e => e.shiftTeam === currentSliceTeam) : employees;
     return teamFiltered.filter(e => lastScheduledIdSet.has(e.id));
-  }, [employees, selectedShift, lastScheduledIdSet]);
+  }, [employees, currentSliceTeam, lastScheduledIdSet]);
 
   const lastSliceAdjustments = useMemo(() => {
     const isNight = lastSlice.lastShiftType === 'Night';
-    const teamFiltered = selectedShift === 'All'
-      ? adjustments
-      : adjustments.filter(a => a.shiftTeam === selectedShift);
+    // Use the auto-detected team from current slice
+    const teamFiltered = currentSliceTeam
+      ? adjustments.filter(a => a.shiftTeam === currentSliceTeam)
+      : adjustments;
     return teamFiltered.filter(a => a.date === lastSlice.lastDateIso && a.isNight === isNight);
-  }, [adjustments, selectedShift, lastSlice.lastDateIso, lastSlice.lastShiftType]);
+  }, [adjustments, currentSliceTeam, lastSlice.lastDateIso, lastSlice.lastShiftType]);
 
   const lastSliceOvertimeCount = useMemo(() => {
     return lastSliceAdjustments.filter(a => a.adjustmentType === 'Overtime').length;
@@ -532,32 +667,59 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return arrived;
   }, [lastSliceAdjustments, lastSliceEmployees]);
 
+  // Loading state
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px' }}>
+        <Loader2 size={48} style={{ animation: 'spin 1s linear infinite' }} />
+        <p style={{ color: 'var(--text-secondary)' }}>{t('common.loading') || 'Loading data from Dataverse...'}</p>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Error state with retry option
+  if (loadError) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', padding: '24px' }}>
+        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.error') || 'Error loading data'}</div>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{loadError}</p>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            onClick={() => window.location.reload()}
+            style={{ padding: '8px 16px', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            {t('common.retry') || 'Retry'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     // Layout: header + toolbar + table + adjustment panel
-    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', height: '100%', minHeight: 0 }}>
-      {/* Header */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0' }}>{t('attendance.title')}</h1>
-          <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{t('attendance.subtitle')}</p>
-        </div>
+    <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', height: '100%', minHeight: 0 }}>
+      {/* Header - Compact single line */}
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{
-            fontSize: '12px',
-            padding: '4px 10px',
-            borderRadius: '12px',
-            background: '#fff3e0',
-            color: '#e65100',
-            fontWeight: 500
-          }}>
-            {`📋 ${t('attendance.dataSourceMock')}`}
-          </span>
+          <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>{t('attendance.title')}</h1>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{t('attendance.subtitle')}</span>
         </div>
+        <span style={{
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '10px',
+          background: '#e8f5e9',
+          color: '#2e7d32',
+          fontWeight: 500
+        }}>
+          {`☁️ Dataverse (${dataverseData?.employees.length ?? 0} employees)`}
+        </span>
       </div>
 
       {/* Schedule Editor */}
       <div className='card' style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
           <div className='flex items-center gap-4'>
             <div style={{ position: 'relative' }}>
               <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
@@ -946,235 +1108,359 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             </div>
 
             {/* Main: cards + table */}
-            <div style={{ padding: '12px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 220px))', gap: '12px' }}>
-                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.totalWorkers')}</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{employees.length}</div>
+            <div style={{ padding: '8px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {/* Compact horizontal stats row */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                {/* Quick stats - inline compact cards */}
+                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.totalWorkers')}</span>
+                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{employees.length}</span>
                 </div>
-                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.scheduledSlice')}</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{galleryEmployees.length}</div>
+                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.scheduledSlice')}</span>
+                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{galleryEmployees.length}</span>
                 </div>
-                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.overtimeSlice')}</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{sliceOvertimeCount}</div>
+                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.overtimeSlice')}</span>
+                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{sliceOvertimeCount}</span>
                 </div>
-                <div className='card' style={{ padding: '12px', width: '100%', maxWidth: '240px' }}>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('attendance.leaveSlice')}</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.1 }}>{sliceLeaveCount}</div>
+                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.leaveSlice')}</span>
+                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{sliceLeaveCount}</span>
+                </div>
+
+                {/* Divider */}
+                <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
+
+                {/* Last Color Shift label + meta + compact cards (same height as other cards) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)' }}>
+                    {t('attendance.lastColorShift')}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      padding: '2px 10px',
+                      borderRadius: '999px',
+                      border: '1px solid #dbeafe',
+                      background: '#eff6ff',
+                      color: 'var(--accent-blue)',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {lastSlice.lastDateKey} • {lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')} • {lastSlice.lastTeam ? t(filterKeys[lastSlice.lastTeam] || lastSlice.lastTeam) : '-'}
+                  </span>
+
+                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('attendance.totalWorkers')}</span>
+                    <span style={{ fontSize: '16px', fontWeight: 800 }}>
+                      {currentSliceTeam ? employees.filter(e => e.shiftTeam === currentSliceTeam).length : employees.length}
+                    </span>
+                  </div>
+                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t('attendance.actualArrivedPlanInternal')}
+                    </span>
+                    <span style={{ fontSize: '16px', fontWeight: 800, whiteSpace: 'nowrap' }}>{lastSliceInternalArrived}/{lastSliceInternalPlan}</span>
+                  </div>
+                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t('attendance.actualArrivedPlanThirdParty')}
+                    </span>
+                    <span style={{ fontSize: '16px', fontWeight: 800, whiteSpace: 'nowrap' }}>{lastSliceThirdPartyArrived}/{lastSliceThirdPartyPlan}</span>
+                  </div>
+                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('attendance.overtimeWorkers')}</span>
+                    <span style={{ fontSize: '16px', fontWeight: 800 }}>{lastSliceOvertimeCount}</span>
+                  </div>
+                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('attendance.leaveWorkers')}</span>
+                    <span style={{ fontSize: '16px', fontWeight: 800 }}>{lastSliceLeaveCount}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className='card' style={{ padding: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('attendance.lastColorShift')}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    {lastSlice.lastDateKey} • {lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.totalWorkers')}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
-                      {selectedShift === 'All' ? employees.length : employees.filter(e => e.shiftTeam === selectedShift).length}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.actualArrivedPlanInternal')}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
-                      {lastSliceInternalArrived}/{lastSliceInternalPlan}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.actualArrivedPlanThirdParty')}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>
-                      {lastSliceThirdPartyArrived}/{lastSliceThirdPartyPlan}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.overtimeWorkers')}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>{lastSliceOvertimeCount}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t('attendance.leaveWorkers')}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, lineHeight: 1.2 }}>{lastSliceLeaveCount}</div>
-                  </div>
-                </div>
-              </div>
-
+              {/* Table card with header and actions */}
               <div className='card' style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {/* Table header with title and action buttons */}
                 <div
                   style={{
-                    padding: '12px 16px',
+                    padding: '8px 12px',
                     borderBottom: '1px solid var(--border-color)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: '12px',
+                    gap: '10px',
                     flexWrap: 'wrap',
                     background: '#fafafa'
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '16px' }}>{t('attendance.allWorkers')}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 700, fontSize: '14px' }}>{t('attendance.allWorkers')}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                       {selectedDateKey} • {selectedShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}
-                    </div>
+                    </span>
+                    {selectedRowIds.size > 0 && (
+                      <span style={{ 
+                        fontSize: '11px', 
+                        padding: '2px 8px', 
+                        borderRadius: '10px', 
+                        background: '#eff6ff', 
+                        color: 'var(--accent-blue)',
+                        fontWeight: 600
+                      }}>
+                        {selectedRowIds.size} selected
+                      </span>
+                    )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <div style={{ position: 'relative' }}>
-                      <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-                      <input
-                        type='text'
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder={t('attendance.quickSearch')}
-                        className='input'
-                        style={{ paddingLeft: '36px', width: '220px' }}
-                      />
-                    </div>
-
-                    <select
-                      value={selectedShift}
-                      onChange={(e) => setSelectedShift(e.target.value)}
-                      className='input'
-                      style={{ width: '160px', background: 'white' }}
-                    >
-                      {['All', 'Green', 'Blue', 'Orange', 'Yellow'].map(filter => (
-                        <option key={filter} value={filter}>
-                          {t(filterKeys[filter])}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button className='btn btn-secondary' type='button' disabled style={{ opacity: 0.7 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {selectedRowIds.size > 0 && (
+                      <button
+                        className='btn'
+                        type='button'
+                        onClick={handleDeleteSelectedWorkers}
+                        style={{ 
+                          padding: '4px 10px', 
+                          fontSize: '12px',
+                          background: 'rgba(255, 59, 48, 0.1)',
+                          color: 'var(--danger)',
+                          border: '1px solid rgba(255, 59, 48, 0.3)'
+                        }}
+                      >
+                        🗑 Delete ({selectedRowIds.size})
+                      </button>
+                    )}
+                    <button className='btn btn-secondary' type='button' disabled style={{ opacity: 0.7, padding: '4px 10px', fontSize: '12px' }}>
                       {t('attendance.export')}
                     </button>
                     <button
                       className='btn btn-primary'
                       type='button'
-                      onClick={() => setShowAddPicker(prev => !prev)}
+                      onClick={() => (showAddPicker ? closeAddWorkerModal() : setShowAddPicker(true))}
+                      style={{ padding: '4px 10px', fontSize: '12px' }}
                     >
-                      {t('attendance.addWorker')}
+                      {`+ ${t('attendance.addWorker')}`}
                     </button>
                   </div>
                 </div>
 
+                {/* Add Worker Modal */}
                 {showAddPicker && (
-                  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', background: 'white' }}>
-                    <div style={{
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '10px',
-                      background: 'white',
-                      padding: '12px',
+                  <div
+                    role='dialog'
+                    aria-modal='true'
+                    onMouseDown={(e) => {
+                      if (e.currentTarget === e.target) closeAddWorkerModal();
+                    }}
+                    style={{
+                      position: 'fixed',
+                      inset: 0,
+                      background: 'rgba(0,0,0,0.35)',
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px'
-                    }}>
-                      <div style={{ position: 'relative' }}>
-                        <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-                        <input
-                          type='text'
-                          value={addSearchQuery}
-                          onChange={(e) => setAddSearchQuery(e.target.value)}
-                          placeholder={t('attendance.searchByIdOrName')}
-                          className='input'
-                          style={{ paddingLeft: '36px', width: '100%' }}
-                        />
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 9999,
+                      padding: 12
+                    }}
+                  >
+                    <div
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        width: 'min(920px, 96vw)',
+                        maxHeight: 'min(640px, 92vh)',
+                        background: 'white',
+                        borderRadius: 12,
+                        border: '1px solid rgba(0,0,0,0.12)',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: '10px 12px',
+                          borderBottom: '1px solid var(--border-color)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, fontSize: 14 }}>{t('attendance.addWorker')}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {t('attendance.selected') ?? 'Selected'}: {addEmployeeIds.size}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button
+                            onClick={closeAddWorkerModal}
+                            className='btn btn-secondary'
+                            type='button'
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                          >
+                            {t('attendance.close') ?? 'Close'}
+                          </button>
+                          <button
+                            onClick={handleAddWorkersToGallery}
+                            disabled={addEmployeeIds.size === 0}
+                            className='btn'
+                            type='button'
+                            style={{
+                              padding: '6px 14px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              backgroundColor: addEmployeeIds.size > 0 ? '#4caf50' : '#f5f5f5',
+                              color: addEmployeeIds.size > 0 ? '#fff' : '#999',
+                              border: `1px solid ${addEmployeeIds.size > 0 ? '#4caf50' : '#e0e0e0'}`,
+                              cursor: addEmployeeIds.size > 0 ? 'pointer' : 'not-allowed',
+                              opacity: addEmployeeIds.size > 0 ? 1 : 0.6
+                            }}
+                          >
+                            {t('attendance.addSelected') ?? 'Add'} {addEmployeeIds.size > 0 ? `(${addEmployeeIds.size})` : ''}
+                          </button>
+                        </div>
                       </div>
 
-                      <div style={{
-                        maxHeight: '220px',
-                        overflowY: 'auto',
-                        border: '1px solid #f0f0f0',
-                        borderRadius: '8px'
-                      }}>
-                        {filteredAvailableEmployeesForGallery.length === 0 ? (
-                          <div style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                            {t('attendance.noMatchingWorkers')}
+                      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                          {/* Team slicer - only affects the add-worker list */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            {(['All', 'Green', 'Blue', 'Orange', 'Yellow'] as const).map(team => {
+                              const active = addTeamFilter === team;
+                              return (
+                                <button
+                                  key={team}
+                                  type='button'
+                                  className='btn'
+                                  onClick={() => setAddTeamFilter(team)}
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '12px',
+                                    borderRadius: '16px',
+                                    border: active ? '1px solid var(--accent-blue)' : '1px solid #e0e0e0',
+                                    background: active ? '#eff6ff' : 'white',
+                                    color: active ? 'var(--accent-blue)' : 'var(--text-primary)',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {team}
+                                </button>
+                              );
+                            })}
                           </div>
-                        ) : (
-                          filteredAvailableEmployeesForGallery.map(emp => {
-                            const selected = addEmployeeId === emp.id;
+
+                          <div style={{ position: 'relative', flex: 1, minWidth: 240, maxWidth: 360 }}>
+                            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
+                            <input
+                              type='text'
+                              value={addSearchQuery}
+                              onChange={(e) => setAddSearchQuery(e.target.value)}
+                              placeholder={t('attendance.searchByIdOrName')}
+                              className='input'
+                              style={{ paddingLeft: '32px', width: '100%', height: '32px', fontSize: '13px' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {filteredAvailableEmployeesForGallery.length} available
+                        </div>
+
+                        <div
+                          style={{
+                            flex: 1,
+                            minHeight: 0,
+                            overflowY: 'auto',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 10,
+                            background: 'linear-gradient(to bottom, #f8fafc, #fff)',
+                            padding: 10,
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: 6,
+                            alignContent: 'flex-start'
+                          }}
+                        >
+                          {filteredAvailableEmployeesForGallery.map(emp => {
+                            const isSelected = addEmployeeIds.has(emp.id);
                             return (
                               <button
                                 key={emp.id}
-                                onClick={() => setAddEmployeeId(emp.id)}
+                                onClick={() => toggleAddEmployeeSelection(emp.id)}
                                 className='btn'
                                 type='button'
                                 style={{
-                                  width: '100%',
-                                  textAlign: 'left',
-                                  padding: '10px 12px',
-                                  border: 'none',
-                                  borderBottom: '1px solid #f5f5f5',
-                                  background: selected ? '#eff6ff' : 'transparent',
-                                  color: selected ? 'var(--accent-blue)' : 'inherit',
-                                  borderRadius: 0,
-                                  cursor: 'pointer'
+                                  padding: '4px 10px',
+                                  fontSize: '11px',
+                                  borderRadius: '16px',
+                                  border: isSelected ? '1px solid var(--accent-blue)' : '1px solid #e0e0e0',
+                                  background: isSelected ? '#eff6ff' : 'white',
+                                  color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease'
                                 }}
                               >
-                                <div style={{ fontWeight: 700 }}>{emp.id}</div>
-                                <div style={{ fontSize: '12px', color: selected ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>{emp.name}</div>
+                                {isSelected && <span>✓</span>}
+                                <span style={{ fontWeight: 600 }}>{emp.id}</span>
+                                <span style={{ color: isSelected ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>{emp.name}</span>
+                                <span style={{
+                                  marginLeft: 6,
+                                  padding: '1px 6px',
+                                  borderRadius: 999,
+                                  background: 'rgba(0,0,0,0.06)',
+                                  fontSize: 10,
+                                  color: 'var(--text-secondary)'
+                                }}>
+                                  {emp.shiftTeam}
+                                </span>
                               </button>
                             );
-                          })
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                        <button
-                          onClick={() => {
-                            setShowAddPicker(false);
-                            setAddEmployeeId('');
-                            setAddSearchQuery('');
-                          }}
-                          className='btn btn-secondary'
-                          type='button'
-                        >
-                          {t('attendance.cancel')}
-                        </button>
-                        <button
-                          onClick={handleAddWorkerToGallery}
-                          disabled={!addEmployeeId}
-                          className='btn'
-                          type='button'
-                          style={{
-                            backgroundColor: addEmployeeId ? '#4caf50' : '#f5f5f5',
-                            color: addEmployeeId ? '#fff' : '#999',
-                            border: `1px solid ${addEmployeeId ? '#4caf50' : '#e0e0e0'}`,
-                            cursor: addEmployeeId ? 'pointer' : 'not-allowed',
-                            opacity: addEmployeeId ? 1 : 0.6
-                          }}
-                        >
-                          {t('attendance.add')}
-                        </button>
+                          })}
+                          {filteredAvailableEmployeesForGallery.length === 0 && (
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '8px' }}>
+                              {t('attendance.noMatchingWorkers')}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 )}
 
+                {/* Table with selection checkboxes */}
                 <div className='table-container' style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
                   <table>
                     <thead>
                       <tr>
-                        <th style={{ width: '120px' }}>{t('attendance.id')}</th>
-                        <th style={{ width: '260px' }}>{t('attendance.name')}</th>
-                        <th style={{ width: '120px' }}>{t('attendance.role')}</th>
-                        <th style={{ width: '120px' }}>{t('attendance.id_status')}</th>
-                        <th style={{ width: '120px' }}>{t('attendance.status')}</th>
-                        <th style={{ width: '120px' }}>{t('attendance.shift')}</th>
-                        <th style={{ width: '120px' }}>{t('attendance.gender')}</th>
-                        <th style={{ width: '140px' }}>{t('attendance.workingHour')}</th>
-                        <th style={{ width: '140px' }}>{t('attendance.actions')}</th>
+                        <th style={{ width: '40px', padding: '6px 8px', textAlign: 'center' }}>
+                          <input
+                            type='checkbox'
+                            checked={galleryEmployees.length > 0 && selectedRowIds.size === galleryEmployees.length}
+                            onChange={toggleSelectAll}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px' }}
+                          />
+                        </th>
+                        <th style={{ width: '90px', padding: '6px 8px' }}>{t('attendance.id')}</th>
+                        <th style={{ width: '180px', padding: '6px 8px' }}>{t('attendance.name')}</th>
+                        <th style={{ width: '70px', padding: '6px 8px' }}>{t('attendance.role')}</th>
+                        <th style={{ width: '60px', padding: '6px 8px' }}>{t('attendance.id_status')}</th>
+                        <th style={{ width: '70px', padding: '6px 8px' }}>{t('attendance.status')}</th>
+                        <th style={{ width: '60px', padding: '6px 8px' }}>{t('attendance.shift')}</th>
+                        <th style={{ width: '60px', padding: '6px 8px' }}>{t('attendance.gender')}</th>
+                        <th style={{ width: '80px', padding: '6px 8px' }}>{t('attendance.workingHour')}</th>
+                        <th style={{ width: '70px', padding: '6px 8px' }}>{t('attendance.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {galleryEmployees.length === 0 ? (
                         <tr>
-                          <td colSpan={9} style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                          <td colSpan={10} style={{ padding: '12px', color: 'var(--text-secondary)', textAlign: 'center' }}>
                             {t('attendance.noEmployeesInSlice')}
                           </td>
                         </tr>
@@ -1202,41 +1488,56 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                             a.isNight === isNight &&
                             a.adjustmentType === 'Leave'
                           );
+                          const isRowSelected = selectedRowIds.has(emp.id);
                           return (
-                            <tr key={emp.id}>
-                              <td style={{ color: 'var(--text-secondary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                            <tr 
+                              key={emp.id}
+                              style={{ 
+                                background: isRowSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+                                transition: 'background 0.15s ease'
+                              }}
+                            >
+                              <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                                <input
+                                  type='checkbox'
+                                  checked={isRowSelected}
+                                  onChange={() => toggleRowSelection(emp.id)}
+                                  style={{ cursor: 'pointer', width: '14px', height: '14px' }}
+                                />
+                              </td>
+                              <td style={{ color: 'var(--text-secondary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '12px', padding: '4px 8px' }}>
                                 {emp.id}
                               </td>
-                              <td>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <td style={{ padding: '4px 8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                   <div
                                     style={{
-                                      width: '32px',
-                                      height: '32px',
+                                      width: '26px',
+                                      height: '26px',
                                       borderRadius: '999px',
                                       border: '1px solid var(--border-color)',
                                       background: 'white',
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'center',
-                                      fontSize: '12px',
+                                      fontSize: '10px',
                                       fontWeight: 800,
                                       color: 'var(--text-secondary)'
                                     }}
                                   >
                                     {initials}
                                   </div>
-                                  <div style={{ fontWeight: 600 }}>{emp.name}</div>
+                                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{emp.name}</span>
                                 </div>
                               </td>
-                              <td style={{ color: 'var(--text-secondary)' }}>{emp.role}</td>
-                              <td style={{ color: 'var(--text-secondary)' }}>{emp.indirectDirect}</td>
-                              <td style={{ color: 'var(--text-secondary)' }}>{emp.status}</td>
-                              <td>
-                                <span className={`badge ${getShiftClass(emp.shiftTeam)}`}>{emp.shiftTeam}</span>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.role}</td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.indirectDirect}</td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.status}</td>
+                              <td style={{ padding: '4px 8px' }}>
+                                <span className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ fontSize: '11px', padding: '2px 6px' }}>{emp.shiftTeam}</span>
                               </td>
-                              <td style={{ color: 'var(--text-secondary)' }}>{emp.gender}</td>
-                              <td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.gender}</td>
+                              <td style={{ padding: '4px 8px' }}>
                                 <input
                                   type='number'
                                   min={0}
@@ -1269,17 +1570,17 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                       return rest;
                                     });
                                   }}
-                                  style={{ width: '96px' }}
+                                  style={{ width: '60px', height: '26px', fontSize: '12px' }}
                                 />
                               </td>
-                              <td>
+                              <td style={{ padding: '4px 8px' }}>
                                 <button
                                   onClick={() => toggleLeaveForEmployee(emp)}
                                   className='btn'
                                   type='button'
                                   style={{
-                                    padding: '6px 12px',
-                                    fontSize: '13px',
+                                    padding: '3px 8px',
+                                    fontSize: '11px',
                                     backgroundColor: leaveOn ? 'rgba(255, 59, 48, 0.12)' : '#f5f5f5',
                                     color: leaveOn ? 'var(--danger)' : 'var(--text-secondary)',
                                     border: `1px solid ${leaveOn ? 'rgba(255, 59, 48, 0.35)' : 'var(--border-color)'}`,

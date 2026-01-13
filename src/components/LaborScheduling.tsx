@@ -1,12 +1,28 @@
 import { useState, useRef, useMemo } from 'react';
-import { Users, Plus, MessageSquare, Trash2, ChevronDown, Search, X, MessageCircle } from 'lucide-react';
-import { mockAssemblyLines, mockEmployees } from '../data/mockData';
+import { Users, Plus, MessageSquare, Trash2, ChevronDown, Search, X, MessageCircle, Loader2 } from 'lucide-react';
+import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { AssemblyLine, Employee } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
-export default function LaborScheduling() {
+// Default assembly lines structure
+const defaultAssemblyLines: AssemblyLine[] = [
+  { id: 'L1', name: 'L1 - Assembly Line 1', capacity: 8, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L2', name: 'L2 - Assembly Line 2', capacity: 10, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L3', name: 'L3 - Assembly Line 3', capacity: 6, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L4', name: 'L4 - Assembly Line 4', capacity: 12, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L5', name: 'L5 - Assembly Line 5', capacity: 8, currentWorkers: 0, assignedWorkers: [] },
+  { id: 'L6', name: 'L6 - Assembly Line 6', capacity: 10, currentWorkers: 0, assignedWorkers: [] },
+];
+
+interface LaborSchedulingProps {
+  isInitialized?: boolean;
+}
+
+export default function LaborScheduling({ isInitialized = true }: LaborSchedulingProps) {
   const { t, language } = useLanguage();
-  const [lines, setLines] = useState<AssemblyLine[]>(mockAssemblyLines);
+  const { employees, isLoading, error } = useDataverseEmployees(isInitialized);
+  
+  const [lines, setLines] = useState<AssemblyLine[]>(defaultAssemblyLines);
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [showAddWorkerDropdown, setShowAddWorkerDropdown] = useState(false);
 
@@ -43,7 +59,7 @@ export default function LaborScheduling() {
   
   // Filter employees based on selected date/shift - only show those with attendance
   const availableEmployees = useMemo(() => {
-    if (!selectedShift) return mockEmployees;
+    if (!selectedShift) return employees;
     
     const [dateStr, shiftType] = selectedShift.split('-').length > 3 
       ? [selectedShift.substring(0, 10), selectedShift.substring(11)]
@@ -58,7 +74,7 @@ export default function LaborScheduling() {
     const shiftKey = `${month}/${day}`;
     const isNight = shiftType === 'night';
     
-    return mockEmployees.filter(employee => {
+    return employees.filter(employee => {
       const shiftEntry = employee.shifts[shiftKey];
       if (!shiftEntry) return false;
       
@@ -67,7 +83,7 @@ export default function LaborScheduling() {
       const numValue = parseFloat(shiftValue);
       return !isNaN(numValue) && numValue > 0;
     });
-  }, [selectedShift]);
+  }, [selectedShift, employees]);
   
   // Drag and drop state
   const [draggedWorker, setDraggedWorker] = useState<{ employeeId: string; fromLineId: string; name: string; initials: string; experienceCount: number } | null>(null);
@@ -234,6 +250,33 @@ export default function LaborScheduling() {
     if (current === capacity) return 'var(--success)';
     return 'var(--warning)';
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px' }}>
+        <Loader2 size={48} style={{ animation: 'spin 1s linear infinite' }} />
+        <p style={{ color: 'var(--text-secondary)' }}>{t('common.loading') || 'Loading employees from Dataverse...'}</p>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', padding: '24px' }}>
+        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.error') || 'Error loading data'}</div>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          style={{ padding: '8px 16px', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+        >
+          {t('common.retry') || 'Retry'}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', height: '100%' }}>

@@ -4,7 +4,7 @@
   "type": "Microsoft.PowerApps/apis",
   "properties": {
     "displayName": "Office 365 Users",
-    "iconUri": "https://conn-afd-prod-endpoint-bmc9bqahasf3grgk.b01.azurefd.net/releases/v1.0.1777/1.0.1777.4410/office365users/icon.png",
+    "iconUri": "https://conn-afd-prod-endpoint-bmc9bqahasf3grgk.b01.azurefd.net/releases/v1.0.1788/1.0.1788.4524/office365users/icon.png",
     "iconBrandColor": "#FFFFFF",
     "apiEnvironment": "Shared",
     "isCustomApi": false,
@@ -92,8 +92,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "body",
@@ -127,8 +127,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "$select",
@@ -169,8 +169,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "body",
@@ -219,8 +219,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "$filter",
@@ -291,8 +291,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "userId",
@@ -377,8 +377,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               }
             ]
           }
@@ -403,8 +403,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "userId",
@@ -473,8 +473,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "userId",
@@ -517,8 +517,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "userId",
@@ -575,8 +575,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "userId",
@@ -645,8 +645,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "userId",
@@ -718,8 +718,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "searchTerm",
@@ -802,8 +802,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "searchTerm",
@@ -912,8 +912,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               }
             ]
           }
@@ -936,8 +936,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "id",
@@ -986,8 +986,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "id",
@@ -1046,8 +1046,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "id",
@@ -1100,8 +1100,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "id",
@@ -1144,8 +1144,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "id",
@@ -1206,8 +1206,8 @@
                 "name": "connectionId",
                 "in": "path",
                 "required": true,
-                "type": "string",
-                "x-ms-visibility": "internal"
+                "x-ms-visibility": "internal",
+                "type": "string"
               },
               {
                 "name": "Uri",
@@ -2065,8 +2065,8 @@
       "brandColor": "#FFFFFF",
       "useNewApimVersion": "true",
       "version": {
-        "previous": "v1.0.1767\\1.0.1767.4341",
-        "current": "releases/v1.0.1777\\1.0.1777.4410"
+        "previous": "releases/v1.0.1777\\1.0.1777.4410",
+        "current": "releases/v1.0.1788\\1.0.1788.4524"
       }
     },
     "capabilities": [
@@ -2075,7 +2075,7 @@
     "interfaces": {},
     "description": "Office 365 Users Connection provider lets you access user profiles in your organization using your Office 365 account. You can perform various actions such as get your profile, a user's profile, a user's manager or direct reports and also update a user profile.",
     "createdTime": "2024-03-26T19:22:24.6319451Z",
-    "changedTime": "2025-10-16T07:26:18.2314955Z",
+    "changedTime": "2025-12-30T17:28:57.8287702Z",
     "releaseTag": "Production",
     "tier": "Standard",
     "publisher": "Microsoft",

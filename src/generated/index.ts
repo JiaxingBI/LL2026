@@ -5,7 +5,15 @@
 
 // Models
 export * as CommonModels from './models/CommonModels';
+export * as Jia_ll_demployeesModel from './models/Jia_ll_demployeesModel';
+export * as Jia_ll_dshiftgroupsModel from './models/Jia_ll_dshiftgroupsModel';
+export * as Jia_ll_dshiftplansModel from './models/Jia_ll_dshiftplansModel';
+export * as Jia_ll_fattendancereocrdsModel from './models/Jia_ll_fattendancereocrdsModel';
 export * as Office365UsersModel from './models/Office365UsersModel';
 
 // Services
+export * from './services/Jia_ll_demployeesService';
+export * from './services/Jia_ll_dshiftgroupsService';
+export * from './services/Jia_ll_dshiftplansService';
+export * from './services/Jia_ll_fattendancereocrdsService';
 export * from './services/Office365UsersService';
