@@ -11,6 +11,11 @@ interface LanguageContextType {
 
 const translations: Record<Language, Record<string, string>> = {
   en: {
+    // Common
+    'common.refresh': 'Refresh',
+    'common.retry': 'Retry',
+    'common.error': 'Error',
+    
     // Navbar
     'nav.attendance': 'Attendance',
     'nav.assembly': 'Assembly',
@@ -142,6 +147,11 @@ const translations: Record<Language, Record<string, string>> = {
     'employee.closeSchedule': 'Close Schedule',
   },
   zh: {
+    // Common
+    'common.refresh': '刷新',
+    'common.retry': '重试',
+    'common.error': '错误',
+    
     // Navbar
     'nav.attendance': '出勤计划',
     'nav.assembly': '产线',

@@ -1,10 +1,16 @@
 /**
  * Dataverse Data Loader
+ * 
  * Fetches and transforms data from the four connected Dataverse tables:
- * - jia_ll_demployees (Employees)
- * - jia_ll_dshiftgroups (Shift Groups)
- * - jia_ll_dshiftplans (Shift Plans)
- * - jia_ll_fattendancereocrds (Attendance Records)
+ * - jia_ll_demployees (Employees) – master employee list, filtered by jia_worktype
+ * - jia_ll_dshiftgroups (Shift Groups) – area/department/shift definitions
+ * - jia_ll_dshiftplans (Shift Plans) – READ-ONLY base schedule; colorshift→team mapping
+ * - jia_ll_fattendancereocrds (Attendance Records) – WRITE for exceptions (OT/Leave only)
+ * 
+ * Data Flow:
+ * 1. Load: fetchDataverseData() retrieves all four tables in parallel
+ * 2. Transform: transformDataverseData() joins shiftPlans with employees via colorshift↔jia_worktype
+ * 3. Save: createAttendanceRecord() persists OT/Leave adjustments to ll_fAttendanceRecord
  */
 
 import { Jia_ll_demployeesService } from '../generated/services/Jia_ll_demployeesService';
@@ -34,13 +40,6 @@ export interface TransformedData {
   raw: DataverseData;
 }
 
-const SHIFT_WORKTYPE_PATTERNS = [
-  '12H SHF 1',
-  '12H SHF 2',
-  '12H SHF 3',
-  '12H SHF 4'
-] as const;
-
 /**
  * Fetch all data from the four Dataverse tables
  */
@@ -50,14 +49,8 @@ export async function fetchDataverseData(): Promise<DataverseData> {
     const [employeesResult, shiftGroupsResult, shiftPlansResult, attendanceResult] = await Promise.all([
       Jia_ll_demployeesService.getAll({
         select: ['jia_ll_demployeeid', 'jia_empid', 'jia_name', 'jia_preferredname', 'jia_email', 
-                 'jia_costcenter', 'jia_organizationalunit', 'jia_worktype', 'jia_employeestatus', 'statecode', 'statuscode'],
-        // Only Active employees + only the 12H SHF 1/2/3/4 worktypes
-        filter: "statecode eq 0 and (" +
-          "contains(jia_worktype,'12H SHF 1') or " +
-          "contains(jia_worktype,'12H SHF 2') or " +
-          "contains(jia_worktype,'12H SHF 3') or " +
-          "contains(jia_worktype,'12H SHF 4')" +
-        ")"
+                 'jia_costcenter', 'jia_organizationalunit', 'jia_worktype', 'jia_employeestatus', 'statecode', 'statuscode']
+        // No statecode filter - filter only by jia_worktype in transform
       }),
       Jia_ll_dshiftgroupsService.getAll({
         select: ['jia_ll_dshiftgroupid', 'jia_shift', 'jia_shiftcn', 'jia_area', 'jia_department', 'statecode']
@@ -72,11 +65,31 @@ export async function fetchDataverseData(): Promise<DataverseData> {
       })
     ]);
 
+    const employees = employeesResult.data || [];
+    const shiftGroups = shiftGroupsResult.data || [];
+    const shiftPlans = shiftPlansResult.data || [];
+    const attendanceRecords = attendanceResult.data || [];
+
+    // Debug: log sample worktype values to understand the actual data format
+    if (employees.length > 0) {
+      const sampleWorktypes = employees.slice(0, 10).map(e => e.jia_worktype);
+      console.log('Sample jia_worktype values from Dataverse:', sampleWorktypes);
+    } else {
+      console.warn('No employees returned from Dataverse. Check table permissions and data.');
+    }
+
+    console.log('Dataverse raw counts:', {
+      employees: employees.length,
+      shiftGroups: shiftGroups.length,
+      shiftPlans: shiftPlans.length,
+      attendanceRecords: attendanceRecords.length
+    });
+
     return {
-      employees: employeesResult.data || [],
-      shiftGroups: shiftGroupsResult.data || [],
-      shiftPlans: shiftPlansResult.data || [],
-      attendanceRecords: attendanceResult.data || []
+      employees,
+      shiftGroups,
+      shiftPlans,
+      attendanceRecords
     };
   } catch (error) {
     console.error('Failed to fetch Dataverse data:', error);
@@ -86,15 +99,31 @@ export async function fetchDataverseData(): Promise<DataverseData> {
 
 /**
  * Map color shift from Dataverse to ShiftTeam type
+ * Handles both English and Chinese color names
+ * Returns null for non-color values (e.g., "停线" = line stop)
  */
-export function mapColorToShiftTeam(colorShift?: string): ShiftTeam {
-  if (!colorShift) return 'Green';
+export function mapColorToShiftTeam(colorShift?: string): ShiftTeam | null {
+  if (!colorShift) return null;
   const color = colorShift.toLowerCase();
+  
+  // Skip non-color shifts like "停线" (line stop/shutdown)
+  if (color.includes('停')) return null;
+  
+  // English color names
   if (color.includes('green')) return 'Green';
   if (color.includes('blue')) return 'Blue';
   if (color.includes('orange')) return 'Orange';
   if (color.includes('yellow')) return 'Yellow';
-  return 'Green';
+  
+  // Chinese color names (绿班/绿色, 蓝班/蓝色, 橙班/橙色, 黄班/黄色)
+  if (color.includes('绿')) return 'Green';   // 绿 = green
+  if (color.includes('蓝')) return 'Blue';    // 蓝 = blue
+  if (color.includes('橙')) return 'Orange';  // 橙 = orange
+  if (color.includes('黄')) return 'Yellow';  // 黄 = yellow
+  
+  // If it doesn't match any known color, log warning and return null
+  console.warn('Unknown colorshift value (not a color):', colorShift);
+  return null;
 }
 
 function mapWorkTypeToShiftTeam(workType?: string): ShiftTeam | null {
@@ -102,19 +131,30 @@ function mapWorkTypeToShiftTeam(workType?: string): ShiftTeam | null {
   const normalized = workType.toUpperCase();
 
   // User requirement: worktype contains "12H SHF 1/2/3/4".
-  // Be permissive about spacing (e.g. SHF1 vs SHF 1).
-  if (!normalized.includes('12H')) return null;
-  if (/SHF\s*1/.test(normalized)) return 'Green';
-  if (/SHF\s*2/.test(normalized)) return 'Orange';
-  if (/SHF\s*3/.test(normalized)) return 'Yellow';
-  if (/SHF\s*4/.test(normalized)) return 'Blue';
+  // Be permissive about spacing and variations (e.g. SHF1, SHF 1, Shift 1, etc.).
+  // Match patterns like "SHF 1", "SHF1", "SHIFT 1", "SHIFT1"
+  if (/SHF\s*1|SHIFT\s*1/i.test(normalized)) return 'Green';
+  if (/SHF\s*2|SHIFT\s*2/i.test(normalized)) return 'Orange';
+  if (/SHF\s*3|SHIFT\s*3/i.test(normalized)) return 'Yellow';
+  if (/SHF\s*4|SHIFT\s*4/i.test(normalized)) return 'Blue';
+  
+  // Also check for color names directly
+  if (normalized.includes('GREEN')) return 'Green';
+  if (normalized.includes('ORANGE')) return 'Orange';
+  if (normalized.includes('YELLOW')) return 'Yellow';
+  if (normalized.includes('BLUE')) return 'Blue';
+  
   return null;
 }
 
+/**
+ * Check if employee worktype qualifies for scheduling view.
+ * More permissive matching to handle various data formats.
+ */
 function isEligibleEmployeeWorkType(workType?: string): boolean {
   if (!workType) return false;
-  const normalized = workType.toUpperCase();
-  return SHIFT_WORKTYPE_PATTERNS.some(p => normalized.includes(p));
+  // If we can map it to a shift team, it's eligible
+  return mapWorkTypeToShiftTeam(workType) !== null;
 }
 
 /**
@@ -145,61 +185,165 @@ function mapEmployeeStatusToWorkStatus(status?: string): WorkStatus {
 
 /**
  * Transform Dataverse data into app-compatible Employee format
+ * 
+ * KEY LOGIC:
+ * - Employees come from ll_dEmployee, filtered by jia_worktype containing "12H SHF 1/2/3/4"
+ * - Schedule grid cells are populated from ll_dShiftPlan:
+ *   When ll_dShiftPlan.jia_colorshift matches the employee's derived shiftTeam color,
+ *   that employee is scheduled for that date and shows "12" (default hours).
+ * - Attendance records (ll_fAttendanceRecord) are NOT used for initial load;
+ *   they store exceptions only (OT/Leave) and would be merged separately.
  */
 export function transformDataverseData(data: DataverseData): TransformedData {
   const year = new Date().getFullYear();
   
-  // Build date keys from shift plans
-  const dateKeySet = new Set<string>();
+  // Build date keys from shift plans - find min and max dates to create continuous range
+  const dateObjects: Date[] = [];
+  
   for (const plan of data.shiftPlans) {
     if (plan.jia_date) {
       // jia_date could be ISO format (2026-01-13) or other formats
       const parts = plan.jia_date.split(/[-\/]/);
       if (parts.length >= 3) {
+        const yearPart = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10);
         const day = parseInt(parts[2], 10);
-        if (month && day) {
-          dateKeySet.add(`${month}/${day}`);
+        if (yearPart && month && day) {
+          dateObjects.push(new Date(yearPart, month - 1, day));
         }
       }
     }
   }
   
-  // Sort date keys chronologically
-  const dateKeys = Array.from(dateKeySet).sort((a, b) => {
-    const [am, ad] = a.split('/').map(Number);
-    const [bm, bd] = b.split('/').map(Number);
-    return am !== bm ? am - bm : ad - bd;
-  });
-
-  // If no dates from shift plans, generate current month range
-  if (dateKeys.length === 0) {
+  let dateKeys: string[] = [];
+  
+  if (dateObjects.length === 0) {
+    // No dates from shift plans, generate current month range
     const now = new Date();
     const currentMonth = now.getMonth() + 1;
     const daysInMonth = new Date(year, currentMonth, 0).getDate();
     for (let d = 1; d <= daysInMonth; d++) {
       dateKeys.push(`${currentMonth}/${d}`);
     }
+  } else {
+    // Find min and max dates
+    const minDate = new Date(Math.min(...dateObjects.map(d => d.getTime())));
+    const maxDate = new Date(Math.max(...dateObjects.map(d => d.getTime())));
+    
+    console.log(`Creating continuous date range from ${minDate.toISOString().split('T')[0]} to ${maxDate.toISOString().split('T')[0]}`);
+    
+    // Generate all dates in the range
+    const currentDate = new Date(minDate);
+    while (currentDate <= maxDate) {
+      const month = currentDate.getMonth() + 1;
+      const day = currentDate.getDate();
+      dateKeys.push(`${month}/${day}`);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
   }
 
-  // Transform employees
-  const employees: Employee[] = data.employees
-    // Active employees only
-    .filter(emp => emp.statecode === 0)
-    // Worktype must contain 12H SHF 1/2/3/4
-    .filter(emp => isEligibleEmployeeWorkType(emp.jia_worktype))
+  /*---------------------------------------------------------------------------
+   * Build a lookup: dateKey → Day/Night → Set of scheduled color teams
+   * This is derived from ll_dShiftPlan.
+   * Example: "1/20" → "Day" → Set(['Green', 'Blue'])
+   *--------------------------------------------------------------------------*/
+  const shiftPlanLookup = new Map<string, { day: Set<ShiftTeam>; night: Set<ShiftTeam> }>();
+
+  console.log('Building shift plan lookup from', data.shiftPlans.length, 'plans');
+
+  for (const plan of data.shiftPlans) {
+    if (!plan.jia_date || !plan.jia_colorshift) {
+      console.warn('Skipping plan with missing date or colorshift:', plan);
+      continue;
+    }
+
+    // Parse date to dateKey
+    const parts = plan.jia_date.split(/[-\/]/);
+    if (parts.length < 3) {
+      console.warn('Invalid date format:', plan.jia_date);
+      continue;
+    }
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if (!month || !day) {
+      console.warn('Invalid month/day:', { month, day, date: plan.jia_date });
+      continue;
+    }
+    const dateKey = `${month}/${day}`;
+
+    // Determine which color team this plan row schedules
+    const colorTeam = mapColorToShiftTeam(plan.jia_colorshift);
+    
+    // Skip non-color shifts (e.g., "停线" = line stop)
+    if (colorTeam === null) {
+      console.log(`Skipping non-color shift: ${plan.jia_colorshift} on ${dateKey}`);
+      continue;
+    }
+
+    // Determine day/night - handle both English and Chinese
+    // English: "night", "Night", "NIGHT"
+    // Chinese: "夜班", "夜", "晚班"
+    const shiftType = plan.jia_daynightshift?.toLowerCase() || '';
+    const isNight = shiftType.includes('night') || shiftType.includes('夜') || shiftType.includes('晚');
+
+    console.log(`Plan entry: ${dateKey} ${isNight ? 'Night' : 'Day'} → ${colorTeam} (colorshift: ${plan.jia_colorshift}, daynightshift: ${plan.jia_daynightshift})`);
+
+    // Add to lookup
+    if (!shiftPlanLookup.has(dateKey)) {
+      shiftPlanLookup.set(dateKey, { day: new Set(), night: new Set() });
+    }
+    const entry = shiftPlanLookup.get(dateKey)!;
+    if (isNight) {
+      entry.night.add(colorTeam);
+    } else {
+      entry.day.add(colorTeam);
+    }
+  }
+
+  // Debug: log the final lookup map
+  console.log('Final shift plan lookup:');
+  for (const [dateKey, shifts] of shiftPlanLookup.entries()) {
+    const dayTeams = Array.from(shifts.day).join(', ') || 'none';
+    const nightTeams = Array.from(shifts.night).join(', ') || 'none';
+    console.log(`  ${dateKey}: Day=[${dayTeams}], Night=[${nightTeams}]`);
+  }
+
+  // Transform employees - filter only by jia_worktype (no statecode filter)
+  const eligibleEmployees = data.employees.filter(emp => isEligibleEmployeeWorkType(emp.jia_worktype));
+  
+  // Debug: log filtering results
+  console.log('Employee filtering:', {
+    total: data.employees.length,
+    eligibleByWorktype: eligibleEmployees.length
+  });
+  
+  // If no eligible employees, show what worktypes exist so we can fix the filter
+  if (eligibleEmployees.length === 0 && data.employees.length > 0) {
+    const uniqueWorktypes = [...new Set(data.employees.map(e => e.jia_worktype).filter(Boolean))];
+    console.warn('No employees matched worktype filter. Existing worktypes:', uniqueWorktypes.slice(0, 20));
+  }
+
+  const employees: Employee[] = eligibleEmployees
     .map(emp => {
       const shiftTeam = mapWorkTypeToShiftTeam(emp.jia_worktype) ?? 'Green';
 
       const shifts: Record<string, ShiftEntry> = {};
       
-      // Initialize all dates with empty shifts
+      /*-----------------------------------------------------------------------
+       * Populate schedule cells from ll_dShiftPlan join:
+       * If the employee's shiftTeam is scheduled on a given date/shift,
+       * show "12" (default scheduled hours). Otherwise leave empty.
+       *----------------------------------------------------------------------*/
       for (const dateKey of dateKeys) {
-        shifts[dateKey] = { day: '', night: '' };
-      }
+        const planEntry = shiftPlanLookup.get(dateKey);
+        const dayScheduled = planEntry?.day.has(shiftTeam) ?? false;
+        const nightScheduled = planEntry?.night.has(shiftTeam) ?? false;
 
-      // TODO: Link attendance records to employee shifts when employee relationship is available
-      // For now, employees start with empty schedules that can be filled via the UI
+        shifts[dateKey] = {
+          day: dayScheduled ? '12' : '',
+          night: nightScheduled ? '12' : ''
+        };
+      }
 
       return {
         id: emp.jia_empid || emp.jia_ll_demployeeid,

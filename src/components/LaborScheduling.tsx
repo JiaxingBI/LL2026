@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from 'react';
-import { Users, Plus, MessageSquare, Trash2, ChevronDown, Search, X, MessageCircle, Loader2 } from 'lucide-react';
+import { Users, Plus, MessageSquare, Trash2, ChevronDown, Search, X, MessageCircle, Loader2, RefreshCw } from 'lucide-react';
 import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { AssemblyLine, Employee } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -20,7 +20,7 @@ interface LaborSchedulingProps {
 
 export default function LaborScheduling({ isInitialized = true }: LaborSchedulingProps) {
   const { t, language } = useLanguage();
-  const { employees, isLoading, error } = useDataverseEmployees(isInitialized);
+  const { employees, isLoading, error, refetch } = useDataverseEmployees(isInitialized);
   
   const [lines, setLines] = useState<AssemblyLine[]>(defaultAssemblyLines);
   const [selectedShift, setSelectedShift] = useState<string>('');
@@ -364,6 +364,24 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
           <ChevronDown size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} />
         </div>
         <div className="flex" style={{ gap: '12px' }}>
+          <button 
+            onClick={() => refetch()}
+            disabled={isLoading}
+            className="btn"
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px',
+              background: 'white',
+              border: '1px solid #e5e7eb',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.6 : 1
+            }}
+            title={t('common.refresh') || 'Refresh data'}
+          >
+            <RefreshCw size={16} className={isLoading ? 'spin' : ''} />
+            {t('common.refresh') || 'Refresh'}
+          </button>
           <button className="btn btn-secondary">
             <MessageSquare size={16} />
             {t('labor.notifyTeam')}

@@ -1,32 +1,134 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Search, Check, RotateCcw, Sun, Moon, Loader2 } from 'lucide-react';
-import { fetchDataverseData, transformDataverseData, type TransformedData } from '../data/dataverseLoader';
-import type { Employee, Adjustment } from '../types';
+import { fetchDataverseData, transformDataverseData, createAttendanceRecord, type TransformedData } from '../data/dataverseLoader';
+import { Jia_ll_dshiftgroupsjia_area } from '../generated/models/Jia_ll_dshiftgroupsModel';
+import type { Employee, Adjustment, ShiftTeam } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import { useLanguage } from '../contexts/LanguageContext';
+import { validateShiftChange } from '../utils/attendanceValidation';
+
+/*******************************************************************************
+ * DATA MODEL – Three-Table Architecture
+ * -----------------------------------------------------------------------------
+ * This component integrates data from three Dataverse tables:
+ *
+ * 1. ll_dEmployee (dimension table)
+ *    - Master list of all employees.
+ *    - Key column: `jia_worktype` – encodes the employee's color-shift team
+ *      (e.g. "SHF 1" → Green, "SHF 2" → Orange, etc.).
+ *    - Used for: displaying employee names, filtering by team.
+ *
+ * 2. ll_dShiftGroup (dimension table)
+ *    - Defines the available shift groups (area × department × shift).
+ *    - Key columns:
+ *        • `jia_shift` / `jia_shiftcn` – shift label (language-dependent),
+ *          used to derive distinct filter options (All/Green/Blue/Orange/Yellow).
+ *        • `jia_area`, `jia_department` – used for area/department slicers.
+ *    - Used for: populating the upper shift-team filter buttons and
+ *      the area/department dropdown slicers.
+ *
+ * 3. ll_dShiftPlan (fact table – read-only schedule)
+ *    - Contains the pre-generated shift schedule.
+ *    - Key columns:
+ *        • `colorshift` – matches employee's `jia_worktype` to determine
+ *          which employees are scheduled on which dates.
+ *        • Date/shift columns indicate scheduled working days.
+ *    - Logic: when `colorshift` matches an employee's `jia_worktype`,
+ *      the pivot cell shows "12" (default scheduled hours).
+ *    - This table is READ-ONLY; base schedules are never written back.
+ *
+ * 4. ll_fAttendanceRecord (fact table – exceptions only)
+ *    - Stores manual adjustments: Overtime (OT) and Leave requests.
+ *    - Only EXCEPTIONS are written here; if an employee follows the normal
+ *      schedule from ll_dShiftPlan, no record is created.
+ *    - Created when: user manually adds/removes hours, marks leave, or
+ *      schedules overtime beyond the base plan.
+ *
+ * Data Flow Summary:
+ *   • Load employees from ll_dEmployee, map `jia_worktype` → shiftTeam.
+ *   • Load shift groups from ll_dShiftGroup for filter UI.
+ *   • Load shift plans from ll_dShiftPlan, join with employees via colorshift.
+ *   • Display schedule; edits create Adjustment records destined for
+ *     ll_fAttendanceRecord (OT/Leave only).
+ ******************************************************************************/
 
 type ShiftType = 'Day' | 'Night';
 
+/**
+ * Infers a scheduling team (Green/Orange/Yellow/Blue) from a Dataverse shift-group label.
+ *
+ * Notes:
+ * - Shift groups commonly encode the team as e.g. "12H SHF 1".
+ * - Employees encode similar info via `jia_worktype`, but here we only have the shift-group text.
+ */
+function inferShiftTeamFromShiftGroupLabel(label?: string): ShiftTeam | null {
+  const s = (label ?? '').toLowerCase();
+  if (!s) return null;
+  if (s.includes('green') || /shf\s*1/.test(s) || /shift\s*1/.test(s)) return 'Green';
+  if (s.includes('orange') || /shf\s*2/.test(s) || /shift\s*2/.test(s)) return 'Orange';
+  if (s.includes('yellow') || /shf\s*3/.test(s) || /shift\s*3/.test(s)) return 'Yellow';
+  if (s.includes('blue') || /shf\s*4/.test(s) || /shift\s*4/.test(s)) return 'Blue';
+  return null;
+}
+
+/**
+ * Resolves a friendly Area label for a shift group.
+ *
+ * Dataverse option sets may provide:
+ * - a numeric code (e.g. `jia_area`), and
+ * - a formatted display value (often surfaced as `...name`).
+ *
+ * We prefer the formatted name when present; otherwise we fall back to the generated enum mapping.
+ */
+function getShiftGroupAreaName(areaCode?: unknown, areaName?: unknown): string | null {
+  if (typeof areaName === 'string' && areaName.trim()) return areaName.trim();
+  if (areaCode === undefined || areaCode === null) return null;
+  const key = areaCode as keyof typeof Jia_ll_dshiftgroupsjia_area;
+  const mapped = Jia_ll_dshiftgroupsjia_area[key];
+  if (typeof mapped === 'string' && mapped.trim()) return mapped;
+  return String(areaCode);
+}
+
+/**
+ * Returns "now" in UTC+8.
+ *
+ * The app’s scheduling rules (today, day/night boundary) are based on local factory time (UTC+8).
+ */
 function getUtc8Now(): Date {
   const now = new Date();
   const utcMillis = now.getTime() + now.getTimezoneOffset() * 60_000;
   return new Date(utcMillis + 8 * 60 * 60_000);
 }
 
+/**
+ * Infers Day vs Night shift based on UTC+8 time.
+ * Day: 07:00–18:59, Night: 19:00–06:59.
+ */
 function inferShiftTypeUtc8(nowUtc8: Date): ShiftType {
   const hour = nowUtc8.getHours();
   return hour >= 7 && hour < 19 ? 'Day' : 'Night';
 }
 
+/**
+ * Formats a month/day pair into the app’s date-key format used by the schedule grid.
+ * Example: `1/20`.
+ */
 function toDateKey(month: number, day: number): string {
   return `${month}/${day}`;
 }
 
+/**
+ * Converts an app date-key (M/D) into an ISO date string (YYYY-MM-DD) for a given year.
+ */
 function toIsoDateFromKey(year: number, dateKey: string): string {
   const [month, day] = dateKey.split('/').map(Number);
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+/**
+ * Adds (or subtracts) whole days from an ISO date (YYYY-MM-DD), returning a new ISO date.
+ * Uses UTC arithmetic to avoid DST/local-time surprises.
+ */
 function isoAddDays(isoDate: string, deltaDays: number): string {
   const [year, month, day] = isoDate.split('-').map(Number);
   const dt = new Date(Date.UTC(year, month - 1, day + deltaDays));
@@ -36,6 +138,9 @@ function isoAddDays(isoDate: string, deltaDays: number): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Converts an ISO date (YYYY-MM-DD) into an app date-key (M/D).
+ */
 function toDateKeyFromIso(isoDate: string): string {
   const [, month, day] = isoDate.split('-').map(Number);
   return `${month}/${day}`;
@@ -46,6 +151,13 @@ interface AttendancePlanProps {
   isInitialized?: boolean;
 }
 
+/**
+ * Attendance scheduling editor.
+ *
+ * Provides two synchronized views over the same underlying schedule grid:
+ * - Pivot view: wide editable table
+ * - Gallery view: date/shift “slice” editor
+ */
 export default function AttendancePlan({ isInitialized = false }: AttendancePlanProps) {
   const { t } = useLanguage();
 
@@ -59,6 +171,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [selectedShift, setSelectedShift] = useState('All');
+  const [selectedArea, setSelectedArea] = useState<string>('All');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('All');
   const [filterNearDates, setFilterNearDates] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -95,6 +209,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       return;
     }
 
+    /**
+     * Loads raw tables from Dataverse and transforms them into the UI-ready shape.
+     * Also initializes the gallery slice defaults (today in UTC+8 when available).
+     */
     const loadDataverseData = async () => {
       try {
         setIsLoading(true);
@@ -107,9 +225,15 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
         setEmployees(transformed.employees);
         setSavedEmployees(JSON.parse(JSON.stringify(transformed.employees)));
         
-        // Update selected date key if we have dates from Dataverse
+        // Gallery default date picker should be "today" (UTC+8) when available
         if (transformed.dateKeys.length > 0) {
-          setSelectedDateKey(transformed.dateKeys[transformed.dateKeys.length - 1]);
+          const nowUtc8 = getUtc8Now();
+          const todayKey = toDateKey(nowUtc8.getMonth() + 1, nowUtc8.getDate());
+          setSelectedDateKey(
+            transformed.dateKeys.includes(todayKey)
+              ? todayKey
+              : transformed.dateKeys[transformed.dateKeys.length - 1]
+          );
         }
         
         console.log('Dataverse data loaded:', {
@@ -137,22 +261,67 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Save changes locally (connections removed)
+  /**
+   * "Confirm" action.
+   * Persists adjustments (OT/Leave) to ll_fAttendanceRecord in Dataverse,
+   * then updates the local snapshot.
+   */
   const handleConfirm = useCallback(async () => {
+    // Only save NEW adjustments (those not yet persisted)
+    // In a full implementation, we'd track which are already in Dataverse.
+    // For now, we save all adjustments that don't have a Dataverse ID pattern.
+    const newAdjustments = adjustments.filter(adj => {
+      // Local IDs are timestamp-based (numeric strings); Dataverse IDs are GUIDs
+      return /^\d+$/.test(adj.id);
+    });
+
+    if (newAdjustments.length > 0) {
+      try {
+        // Save each adjustment to ll_fAttendanceRecord
+        const savePromises = newAdjustments.map(adj => {
+          // Map shiftTeam to colorshift value expected by Dataverse
+          const colorShift = adj.shiftTeam ?? 'Green';
+          
+          return createAttendanceRecord({
+            hours: String(adj.hours),
+            action: adj.adjustmentType ?? 'Overtime', // 'Overtime' or 'Leave'
+            dayNightShift: adj.isNight ? 'Night' : 'Day',
+            colorShift: colorShift,
+            area: '', // Could be derived from employee's area if available
+            department: '' // Could be derived from employee's department if available
+          });
+        });
+
+        await Promise.all(savePromises);
+        console.log(`Saved ${newAdjustments.length} adjustment(s) to Dataverse`);
+      } catch (error) {
+        console.error('Failed to save adjustments to Dataverse:', error);
+        alert(t('attendance.saveFailed') || 'Failed to save some adjustments. Please try again.');
+        return; // Don't update local state if save failed
+      }
+    }
+
+    // Update local snapshot
     setSavedEmployees(JSON.parse(JSON.stringify(employees)));
     setSavedAdjustments(JSON.parse(JSON.stringify(adjustments)));
     setHasChanges(false);
     alert(t('attendance.changesSaved') || 'Changes saved successfully!');
   }, [employees, adjustments, t]);
 
-  // Revert all pending edits back to the last confirmed snapshot (reset button logic)
+  /**
+   * "Reset" action.
+   * Reverts unsaved UI edits back to the last confirmed snapshot.
+   */
   const handleReset = useCallback(() => {
     setEmployees(JSON.parse(JSON.stringify(savedEmployees)));
     setAdjustments(JSON.parse(JSON.stringify(savedAdjustments)));
     setHasChanges(false);
   }, [savedEmployees, savedAdjustments]);
 
-  // Generic helper for editing any top-level employee metadata (role/team/status dropdowns)
+  /**
+   * Updates a top-level employee field (role/team/status/etc.) by `empId`.
+   * Marks the plan as having unsaved changes.
+   */
   const handleEmployeeUpdate = useCallback((empId: string, field: keyof Employee, value: string) => {
     setEmployees(prevEmployees => 
       prevEmployees.map(e => {
@@ -165,7 +334,15 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setHasChanges(true);
   }, []);
 
-  // Handles typing into day/night cells, infers overtime/leave, and stages a change record
+  const allDates = useMemo(() => {
+    return dataverseData?.dateKeys?.length ? dataverseData.dateKeys : [];
+  }, [dataverseData]);
+
+  /**
+   * Updates a single day/night cell in the schedule grid.
+   * Also creates an `Adjustment` record when the edit implies Overtime or Leave.
+   * Validates against attendance rules before applying changes.
+   */
   const handleShiftChange = useCallback((emp: Employee, date: string, isNight: boolean, newValue: string) => {
     // Get the original value before the change
     const originalShift = emp.shifts[date];
@@ -173,6 +350,16 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const originalHours = parseInt(originalValue) || 0;
     const newHours = parseInt(newValue) || 0;
     const normalizedValue = newHours === 0 ? '' : String(newHours);
+
+    // Validate the change against attendance rules
+    const validation = validateShiftChange(emp, date, isNight, newHours, employees, allDates);
+    
+    if (!validation.isValid) {
+      // Show violation alert
+      const violationMessage = validation.violations.join('\n\n');
+      alert(`⚠️ LEGO RBP Rules\n\n${violationMessage}\n\n操作已取消。/ Operation cancelled.`);
+      return; // Don't proceed with the change
+    }
 
     // Update the employee's shift data
     setEmployees(prevEmployees => 
@@ -240,11 +427,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       setAdjustments(prev => [...prev, newAdjustment]);
     }
     setHasChanges(true);
-  }, []);
-
-  const allDates = useMemo(() => {
-    return dataverseData?.dateKeys?.length ? dataverseData.dateKeys : [];
-  }, [dataverseData]);
+  }, [employees, allDates]);
 
   // Optional date window filter; controlled by the near-dates toggle
   // When filterNearDates is ON: show ~14 days around today
@@ -290,7 +473,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     }
   }, [dates, selectedDateKey]);
 
-  // Check if a date string matches today
+  /**
+   * Returns true if the given app date-key (M/D) matches the user's current local "today".
+   * Used only for UI highlighting.
+   */
   const isToday = (dateStr: string) => {
     const today = new Date();
     const [month, day] = dateStr.split('/').map(Number);
@@ -305,11 +491,91 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     'Yellow': 'filter.yellow'
   };
 
+  /*---------------------------------------------------------------------------
+   * SHIFT FILTER BUTTONS (from ll_dShiftGroup)
+   * -------------------------------------------------------------------------
+   * The upper filter bar (All / Green / Blue / Orange / Yellow) is derived
+   * from ll_dShiftGroup.  We use `jia_shift` (English) or `jia_shiftcn`
+   * (Chinese) depending on language context, then infer the team color.
+   * This provides the distinct set of shift-team options for filtering.
+   *--------------------------------------------------------------------------*/
+  // Build area/department slicers from ll_dshiftgroups
+  const shiftGroupDimensions = useMemo(() => {
+    const raw = dataverseData?.raw.shiftGroups ?? [];
+    return raw
+      .filter(g => g.statecode === 0)
+      .map(g => {
+        const area = getShiftGroupAreaName(g.jia_area, (g as any).jia_areaname);
+        const department = (g.jia_department ?? '').trim();
+        // Shift groups encode the shift label (e.g. "12H SHF 1"); employees encode the same info in jia_worktype.
+        // We infer the team from the shift-group label here.
+        const team = inferShiftTeamFromShiftGroupLabel(g.jia_shift || g.jia_shiftcn);
+        return { area, department, team };
+      })
+      .filter(x => x.area && x.department);
+  }, [dataverseData]);
+
+  const areaOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of shiftGroupDimensions) {
+      if (row.area) set.add(row.area);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [shiftGroupDimensions]);
+
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of shiftGroupDimensions) {
+      if (!row.department) continue;
+      if (selectedArea !== 'All' && row.area !== selectedArea) continue;
+      set.add(row.department);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [shiftGroupDimensions, selectedArea]);
+
+  const allowedShiftTeamsByAreaDepartment = useMemo((): Set<ShiftTeam> | null => {
+    if (selectedArea === 'All' && selectedDepartment === 'All') return null;
+    const set = new Set<ShiftTeam>();
+    for (const row of shiftGroupDimensions) {
+      if (!row.team) continue;
+      if (selectedArea !== 'All' && row.area !== selectedArea) continue;
+      if (selectedDepartment !== 'All' && row.department !== selectedDepartment) continue;
+      set.add(row.team);
+    }
+    return set;
+  }, [shiftGroupDimensions, selectedArea, selectedDepartment]);
+
+  // When area changes, reset department to All
+  useEffect(() => {
+    setSelectedDepartment('All');
+  }, [selectedArea]);
+
+  // If current team slicer becomes invalid for the selected area/department, fallback to All
+  useEffect(() => {
+    if (selectedShift === 'All') return;
+    if (!allowedShiftTeamsByAreaDepartment) return;
+    if (!allowedShiftTeamsByAreaDepartment.has(selectedShift as ShiftTeam)) {
+      setSelectedShift('All');
+    }
+  }, [selectedShift, allowedShiftTeamsByAreaDepartment]);
+
+  /*---------------------------------------------------------------------------
+   * EMPLOYEE LIST (from ll_dEmployee)
+   * -------------------------------------------------------------------------
+   * Employees are loaded from ll_dEmployee.  Each employee's `jia_worktype`
+   * is mapped to a shiftTeam (Green/Orange/Yellow/Blue) during data transform.
+   * Filtering by the upper shift buttons matches `emp.shiftTeam`.
+   *--------------------------------------------------------------------------*/
+  const employeesInScope = useMemo(() => {
+    if (!allowedShiftTeamsByAreaDepartment) return employees;
+    return employees.filter(emp => allowedShiftTeamsByAreaDepartment.has(emp.shiftTeam));
+  }, [employees, allowedShiftTeamsByAreaDepartment]);
+
   // Apply filters directly to the displayed rows.
   // Uses debounced search for better performance when typing.
   const filteredEmployees = useMemo(() => {
     const query = debouncedSearch.toLowerCase().trim();
-    return employees.filter(emp => {
+    return employeesInScope.filter(emp => {
       if (selectedShift !== 'All' && emp.shiftTeam !== selectedShift) return false;
       if (query) {
         const nameMatches = emp.name.toLowerCase().includes(query);
@@ -318,8 +584,9 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       }
       return true;
     });
-  }, [employees, selectedShift, debouncedSearch]);
+  }, [employeesInScope, selectedShift, debouncedSearch]);
 
+  /** Maps a shift team value to a CSS badge class. */
   const getShiftClass = (team: string) => {
     switch (team) {
       case 'Green': return 'badge-green';
@@ -330,6 +597,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     }
   };
 
+  /** Maps a shift team value to a subtle row background color for readability. */
   const getRowBackgroundColor = (team: string) => {
     switch (team) {
       case 'Green': return '#e6f4ea';
@@ -342,16 +610,28 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   const gallerySliceKey = useMemo(() => `${selectedDateKey}|${selectedShiftType}`, [selectedDateKey, selectedShiftType]);
 
+  /*---------------------------------------------------------------------------
+   * PIVOT / GALLERY CELL VALUES (from ll_dShiftPlan)
+   * -------------------------------------------------------------------------
+   * The numbers displayed in each cell come from ll_dShiftPlan.
+   * During data transform, we join ll_dShiftPlan.colorshift with
+   * ll_dEmployee.jia_worktype.  When they match (same color-shift team),
+   * the employee is considered "scheduled" for that date, and we show
+   * the default 12 hours.
+   *
+   * `emp.shifts[dateKey]` is populated from this join; if an employee's
+   * team matches the plan's colorshift on a given day, they have hours.
+   *--------------------------------------------------------------------------*/
   const scheduledIdsForSlice = useMemo(() => {
     const ids: string[] = [];
-    for (const emp of employees) {
+    for (const emp of employeesInScope) {
       const shiftEntry = emp.shifts[selectedDateKey];
       const cellValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
       const parsed = parseInt(String(cellValue), 10);
       if (Number.isFinite(parsed) && parsed > 0) ids.push(emp.id);
     }
     return ids;
-  }, [employees, selectedDateKey, selectedShiftType]);
+  }, [employeesInScope, selectedDateKey, selectedShiftType]);
 
   const scheduledIdSet = useMemo(() => new Set<string>(scheduledIdsForSlice), [scheduledIdsForSlice]);
 
@@ -362,8 +642,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   const availableEmployeesForGallery = useMemo(() => {
     // Per spec: choose from whole list not currently in this gallery slice
-    return employees.filter(emp => !scheduledIdSet.has(emp.id));
-  }, [employees, scheduledIdSet]);
+    return employeesInScope.filter(emp => !scheduledIdSet.has(emp.id));
+  }, [employeesInScope, scheduledIdSet]);
 
   const filteredAvailableEmployeesForGallery = useMemo(() => {
     const query = addSearchQuery.toLowerCase().trim();
@@ -374,6 +654,19 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
   }, [availableEmployeesForGallery, addSearchQuery, addTeamFilter]);
 
+  /*---------------------------------------------------------------------------
+   * ADJUSTMENT RECORDS → ll_fAttendanceRecord (exceptions only)
+   * -------------------------------------------------------------------------
+   * The base schedule from ll_dShiftPlan is READ-ONLY and never written back.
+   * Only EXCEPTIONS (Overtime / Leave) are captured in Adjustment records.
+   * When the user manually changes hours or marks leave, we create an
+   * Adjustment that will eventually be persisted to ll_fAttendanceRecord.
+   *--------------------------------------------------------------------------*/
+
+  /**
+   * Appends a new Adjustment record and marks the plan dirty.
+   * Uses a timestamp-based id for local uniqueness.
+   */
   const addAdjustmentRecord = useCallback((payload: Omit<Adjustment, 'id'>) => {
     const record: Adjustment = {
       ...payload,
@@ -387,6 +680,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setGalleryHourDrafts({});
   }, [gallerySliceKey]);
 
+  /**
+   * Creates a Leave adjustment for the currently selected date + Day/Night slice.
+   * This record is destined for ll_fAttendanceRecord (not ll_dShiftPlan).
+   */
   const handleLeaveClick = useCallback((emp: Employee) => {
     const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
     const shiftEntry = emp.shifts[selectedDateKey];
@@ -411,6 +708,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
   }, [addAdjustmentRecord, planYear, selectedDateKey, selectedShiftType]);
 
+  /**
+   * Toggles Leave for the selected slice:
+   * - If a matching Leave adjustment exists, remove it.
+   * - Otherwise add one.
+   */
   const toggleLeaveForEmployee = useCallback((emp: Employee) => {
     const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
     const isNight = selectedShiftType === 'Night';
@@ -431,7 +733,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     handleLeaveClick(emp);
   }, [adjustments, handleLeaveClick, planYear, selectedDateKey, selectedShiftType]);
 
-  // Add multiple workers to the gallery (supports multi-select)
+  /**
+   * Bulk-adds selected employees into the current gallery slice by setting hours (defaults to 12).
+   * Clears the picker state afterwards.
+   */
   const handleAddWorkersToGallery = useCallback(() => {
     if (addEmployeeIds.size === 0) return;
     
@@ -448,7 +753,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setShowAddPicker(false);
   }, [addEmployeeIds, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
 
-  // Toggle selection for add worker picker
+  /** Toggles a single employee id in the "add workers" multi-select set. */
   const toggleAddEmployeeSelection = useCallback((empId: string) => {
     setAddEmployeeIds(prev => {
       const next = new Set(prev);
@@ -461,7 +766,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
   }, []);
 
-  // Delete selected workers from the current slice (remove their hours)
+  /**
+   * Removes selected employees from the current slice by setting their slice hours to 0.
+   * (This is the inverse of adding workers to a slice.)
+   */
   const handleDeleteSelectedWorkers = useCallback(() => {
     if (selectedRowIds.size === 0) return;
     
@@ -477,7 +785,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setHasChanges(true);
   }, [selectedRowIds, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
 
-  // Toggle row selection for delete
+  /** Toggles row selection (used by "delete selected" actions). */
   const toggleRowSelection = useCallback((empId: string) => {
     setSelectedRowIds(prev => {
       const next = new Set(prev);
@@ -490,7 +798,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
   }, []);
 
-  // Select/deselect all rows
+  /** Selects all scheduled rows in the current gallery slice, or clears selection if already all selected. */
   const toggleSelectAll = useCallback(() => {
     if (selectedRowIds.size === galleryEmployees.length) {
       setSelectedRowIds(new Set());
@@ -499,6 +807,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     }
   }, [selectedRowIds, galleryEmployees]);
 
+  /** Closes the "add workers" modal and resets its temporary UI state. */
   const closeAddWorkerModal = useCallback(() => {
     setShowAddPicker(false);
     setAddEmployeeIds(new Set());
@@ -749,6 +1058,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                 </button>
               ))}
             </div>
+
             {/* Modern Toggle Switch */}
             <div 
               onClick={() => setFilterNearDates(!filterNearDates)}
@@ -965,6 +1275,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                               const originalValue = emp.shifts[date]?.day || '';
                               if (e.target.value !== originalValue) {
                                 handleShiftChange(emp, date, false, e.target.value);
+                                // Reset to original value if validation failed
+                                e.target.value = emp.shifts[date]?.day || '';
                               }
                             }}
                             style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
@@ -978,6 +1290,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                               const originalValue = emp.shifts[date]?.night || '';
                               if (e.target.value !== originalValue) {
                                 handleShiftChange(emp, date, true, e.target.value);
+                                // Reset to original value if validation failed
+                                e.target.value = emp.shifts[date]?.night || '';
                               }
                             }}
                             style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
@@ -1032,6 +1346,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                   const todayHighlight = isToday(dateKey);
                   const dateSelected = selectedDateKey === dateKey;
 
+                  // Small helper for rendering the Day/Night pills for a specific date row.
                   const renderShiftButton = (shift: ShiftType) => {
                     const selected = selectedDateKey === dateKey && selectedShiftType === shift;
                     const Icon = shift === 'Day' ? Sun : Moon;
@@ -1152,12 +1467,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                     {lastSlice.lastDateKey} • {lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')} • {lastSlice.lastTeam ? t(filterKeys[lastSlice.lastTeam] || lastSlice.lastTeam) : '-'}
                   </span>
 
-                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('attendance.totalWorkers')}</span>
-                    <span style={{ fontSize: '16px', fontWeight: 800 }}>
-                      {currentSliceTeam ? employees.filter(e => e.shiftTeam === currentSliceTeam).length : employees.length}
-                    </span>
-                  </div>
                   <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {t('attendance.actualArrivedPlanInternal')}
@@ -1565,10 +1874,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                     }
 
                                     handleShiftChange(emp, selectedDateKey, isNight, nextValue);
-                                    setGalleryHourDrafts(prev => {
-                                      const { [draftKey]: _removed, ...rest } = prev;
-                                      return rest;
-                                    });
+                                    // Reset to original value if validation failed
+                                    setGalleryHourDrafts(prev => ({
+                                      ...prev,
+                                      [draftKey]: { value: String(storedRaw || ''), touched: false }
+                                    }));
                                   }}
                                   style={{ width: '60px', height: '26px', fontSize: '12px' }}
                                 />

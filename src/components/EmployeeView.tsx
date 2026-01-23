@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ChevronDown, MessageCircle, Loader2 } from 'lucide-react';
+import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ChevronDown, MessageCircle, Loader2, RefreshCw } from 'lucide-react';
 import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { Employee, AssemblyLine } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -18,7 +18,7 @@ interface EmployeeViewProps {
 
 export default function EmployeeView({ isInitialized = true }: EmployeeViewProps) {
   const { t, language } = useLanguage();
-  const { employees, isLoading, error } = useDataverseEmployees(isInitialized);
+  const { employees, isLoading, error, refetch } = useDataverseEmployees(isInitialized);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -141,6 +141,28 @@ export default function EmployeeView({ isInitialized = true }: EmployeeViewProps
               {t('employee.search')}
             </button>
           </form>
+
+          {/* Refresh Button */}
+          <button
+            onClick={() => refetch()}
+            disabled={isLoading}
+            className="btn"
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px',
+              padding: '8px 16px',
+              background: 'white',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.6 : 1
+            }}
+            title={t('common.refresh') || 'Refresh data'}
+          >
+            <RefreshCw size={16} className={isLoading ? 'spin' : ''} />
+            {t('common.refresh') || 'Refresh'}
+          </button>
 
           {/* Shift Selector */}
           <div style={{ position: 'relative' }}>
