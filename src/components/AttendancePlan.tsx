@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Search, Check, RotateCcw, Sun, Moon, Loader2 } from 'lucide-react';
 import { fetchDataverseData, transformDataverseData, createAttendanceRecord, type TransformedData } from '../data/dataverseLoader';
-import { Jia_ll_dshiftgroupsjia_area } from '../generated/models/Jia_ll_dshiftgroupsModel';
-import type { Employee, Adjustment, ShiftTeam } from '../types';
+import type { Employee, Adjustment } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import { useLanguage } from '../contexts/LanguageContext';
 import { validateShiftChange } from '../utils/attendanceValidation';
@@ -53,41 +52,6 @@ import { validateShiftChange } from '../utils/attendanceValidation';
  ******************************************************************************/
 
 type ShiftType = 'Day' | 'Night';
-
-/**
- * Infers a scheduling team (Green/Orange/Yellow/Blue) from a Dataverse shift-group label.
- *
- * Notes:
- * - Shift groups commonly encode the team as e.g. "12H SHF 1".
- * - Employees encode similar info via `jia_worktype`, but here we only have the shift-group text.
- */
-function inferShiftTeamFromShiftGroupLabel(label?: string): ShiftTeam | null {
-  const s = (label ?? '').toLowerCase();
-  if (!s) return null;
-  if (s.includes('green') || /shf\s*1/.test(s) || /shift\s*1/.test(s)) return 'Green';
-  if (s.includes('orange') || /shf\s*2/.test(s) || /shift\s*2/.test(s)) return 'Orange';
-  if (s.includes('yellow') || /shf\s*3/.test(s) || /shift\s*3/.test(s)) return 'Yellow';
-  if (s.includes('blue') || /shf\s*4/.test(s) || /shift\s*4/.test(s)) return 'Blue';
-  return null;
-}
-
-/**
- * Resolves a friendly Area label for a shift group.
- *
- * Dataverse option sets may provide:
- * - a numeric code (e.g. `jia_area`), and
- * - a formatted display value (often surfaced as `...name`).
- *
- * We prefer the formatted name when present; otherwise we fall back to the generated enum mapping.
- */
-function getShiftGroupAreaName(areaCode?: unknown, areaName?: unknown): string | null {
-  if (typeof areaName === 'string' && areaName.trim()) return areaName.trim();
-  if (areaCode === undefined || areaCode === null) return null;
-  const key = areaCode as keyof typeof Jia_ll_dshiftgroupsjia_area;
-  const mapped = Jia_ll_dshiftgroupsjia_area[key];
-  if (typeof mapped === 'string' && mapped.trim()) return mapped;
-  return String(areaCode);
-}
 
 /**
  * Returns "now" in UTC+8.
@@ -171,9 +135,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [selectedShift, setSelectedShift] = useState('All');
-  const [selectedArea, setSelectedArea] = useState<string>('All');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('All');
-  const [filterNearDates, setFilterNearDates] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -200,6 +161,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [savedEmployees, setSavedEmployees] = useState<Employee[]>([]);
   const [savedAdjustments, setSavedAdjustments] = useState<Adjustment[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  
+  // Custom alert modal state
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+  const [failedInputKey, setFailedInputKey] = useState<string | null>(null);
 
   // Fetch data from Dataverse when SDK is initialized
   useEffect(() => {
@@ -355,10 +321,13 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const validation = validateShiftChange(emp, date, isNight, newHours, employees, allDates);
     
     if (!validation.isValid) {
-      // Show violation alert
+      // Show violation alert - don't modify employee state or adjustments
       const violationMessage = validation.violations.join('\n\n');
-      alert(`⚠️ LEGO RBP Rules\n\n${violationMessage}\n\n操作已取消。/ Operation cancelled.`);
-      return; // Don't proceed with the change
+      setAlertMessage(violationMessage);
+      const inputKey = `${emp.id}-${date}-${isNight ? 'night' : 'day'}`;
+      setFailedInputKey(inputKey);
+      setShowAlertModal(true);
+      return; // Don't proceed with the change - no state updates, no adjustment records
     }
 
     // Update the employee's shift data
@@ -429,9 +398,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setHasChanges(true);
   }, [employees, allDates]);
 
-  // Optional date window filter; controlled by the near-dates toggle
-  // When filterNearDates is ON: show ~14 days around today
-  // When filterNearDates is OFF: show current month ± 1 month (~90 days) to prevent performance issues
+  // Date window filter: always show -1 to +12 days from anchor date
   const baseDateForWindow = useMemo(() => {
     if (viewMode !== 'gallery') return new Date();
     const [month, day] = selectedDateKey.split('/').map(Number);
@@ -443,25 +410,16 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const anchor = baseDateForWindow;
     const year = anchor.getFullYear();
     
-    let startDate: Date;
-    let endDate: Date;
-    
-    if (filterNearDates) {
-      // Near dates: 1 day before to 12 days after
-      startDate = new Date(year, anchor.getMonth(), anchor.getDate() - 1);
-      endDate = new Date(year, anchor.getMonth(), anchor.getDate() + 12);
-    } else {
-      // Extended view: current month ± 1 month (prevents browser crash from 730 columns)
-      startDate = new Date(year, anchor.getMonth() - 1, 1);
-      endDate = new Date(year, anchor.getMonth() + 2, 0); // Last day of next month
-    }
+    // Always show: 1 day before to 12 days after anchor date
+    const startDate = new Date(year, anchor.getMonth(), anchor.getDate() - 1);
+    const endDate = new Date(year, anchor.getMonth(), anchor.getDate() + 12);
     
     return allDates.filter(dateStr => {
       const [month, day] = dateStr.split('/').map(Number);
       const date = new Date(year, month - 1, day);
       return date >= startDate && date <= endDate;
     });
-  }, [allDates, filterNearDates, baseDateForWindow]);
+  }, [allDates, baseDateForWindow]);
 
   const dates = filteredDates;
 
@@ -491,92 +449,14 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     'Yellow': 'filter.yellow'
   };
 
-  /*---------------------------------------------------------------------------
-   * SHIFT FILTER BUTTONS (from ll_dShiftGroup)
-   * -------------------------------------------------------------------------
-   * The upper filter bar (All / Green / Blue / Orange / Yellow) is derived
-   * from ll_dShiftGroup.  We use `jia_shift` (English) or `jia_shiftcn`
-   * (Chinese) depending on language context, then infer the team color.
-   * This provides the distinct set of shift-team options for filtering.
-   *--------------------------------------------------------------------------*/
-  // Build area/department slicers from ll_dshiftgroups
-  const shiftGroupDimensions = useMemo(() => {
-    const raw = dataverseData?.raw.shiftGroups ?? [];
-    return raw
-      .filter(g => g.statecode === 0)
-      .map(g => {
-        const area = getShiftGroupAreaName(g.jia_area, (g as any).jia_areaname);
-        const department = (g.jia_department ?? '').trim();
-        // Shift groups encode the shift label (e.g. "12H SHF 1"); employees encode the same info in jia_worktype.
-        // We infer the team from the shift-group label here.
-        const team = inferShiftTeamFromShiftGroupLabel(g.jia_shift || g.jia_shiftcn);
-        return { area, department, team };
-      })
-      .filter(x => x.area && x.department);
-  }, [dataverseData]);
-
-  const areaOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const row of shiftGroupDimensions) {
-      if (row.area) set.add(row.area);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [shiftGroupDimensions]);
-
-  const departmentOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const row of shiftGroupDimensions) {
-      if (!row.department) continue;
-      if (selectedArea !== 'All' && row.area !== selectedArea) continue;
-      set.add(row.department);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [shiftGroupDimensions, selectedArea]);
-
-  const allowedShiftTeamsByAreaDepartment = useMemo((): Set<ShiftTeam> | null => {
-    if (selectedArea === 'All' && selectedDepartment === 'All') return null;
-    const set = new Set<ShiftTeam>();
-    for (const row of shiftGroupDimensions) {
-      if (!row.team) continue;
-      if (selectedArea !== 'All' && row.area !== selectedArea) continue;
-      if (selectedDepartment !== 'All' && row.department !== selectedDepartment) continue;
-      set.add(row.team);
-    }
-    return set;
-  }, [shiftGroupDimensions, selectedArea, selectedDepartment]);
-
-  // When area changes, reset department to All
-  useEffect(() => {
-    setSelectedDepartment('All');
-  }, [selectedArea]);
-
-  // If current team slicer becomes invalid for the selected area/department, fallback to All
-  useEffect(() => {
-    if (selectedShift === 'All') return;
-    if (!allowedShiftTeamsByAreaDepartment) return;
-    if (!allowedShiftTeamsByAreaDepartment.has(selectedShift as ShiftTeam)) {
-      setSelectedShift('All');
-    }
-  }, [selectedShift, allowedShiftTeamsByAreaDepartment]);
-
-  /*---------------------------------------------------------------------------
-   * EMPLOYEE LIST (from ll_dEmployee)
-   * -------------------------------------------------------------------------
-   * Employees are loaded from ll_dEmployee.  Each employee's `jia_worktype`
-   * is mapped to a shiftTeam (Green/Orange/Yellow/Blue) during data transform.
-   * Filtering by the upper shift buttons matches `emp.shiftTeam`.
-   *--------------------------------------------------------------------------*/
-  const employeesInScope = useMemo(() => {
-    if (!allowedShiftTeamsByAreaDepartment) return employees;
-    return employees.filter(emp => allowedShiftTeamsByAreaDepartment.has(emp.shiftTeam));
-  }, [employees, allowedShiftTeamsByAreaDepartment]);
-
   // Apply filters directly to the displayed rows.
   // Uses debounced search for better performance when typing.
+  // Color shift filter only applies in pivot view, not in gallery view.
   const filteredEmployees = useMemo(() => {
     const query = debouncedSearch.toLowerCase().trim();
-    return employeesInScope.filter(emp => {
-      if (selectedShift !== 'All' && emp.shiftTeam !== selectedShift) return false;
+    return employees.filter(emp => {
+      // Only apply shift filter in pivot view
+      if (viewMode === 'pivot' && selectedShift !== 'All' && emp.shiftTeam !== selectedShift) return false;
       if (query) {
         const nameMatches = emp.name.toLowerCase().includes(query);
         const idMatches = emp.id.toLowerCase().includes(query);
@@ -584,7 +464,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       }
       return true;
     });
-  }, [employeesInScope, selectedShift, debouncedSearch]);
+  }, [employees, selectedShift, debouncedSearch, viewMode]);
 
   /** Maps a shift team value to a CSS badge class. */
   const getShiftClass = (team: string) => {
@@ -624,14 +504,14 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
    *--------------------------------------------------------------------------*/
   const scheduledIdsForSlice = useMemo(() => {
     const ids: string[] = [];
-    for (const emp of employeesInScope) {
+    for (const emp of employees) {
       const shiftEntry = emp.shifts[selectedDateKey];
       const cellValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
       const parsed = parseInt(String(cellValue), 10);
       if (Number.isFinite(parsed) && parsed > 0) ids.push(emp.id);
     }
     return ids;
-  }, [employeesInScope, selectedDateKey, selectedShiftType]);
+  }, [employees, selectedDateKey, selectedShiftType]);
 
   const scheduledIdSet = useMemo(() => new Set<string>(scheduledIdsForSlice), [scheduledIdsForSlice]);
 
@@ -642,8 +522,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   const availableEmployeesForGallery = useMemo(() => {
     // Per spec: choose from whole list not currently in this gallery slice
-    return employeesInScope.filter(emp => !scheduledIdSet.has(emp.id));
-  }, [employeesInScope, scheduledIdSet]);
+    return employees.filter(emp => !scheduledIdSet.has(emp.id));
+  }, [employees, scheduledIdSet]);
 
   const filteredAvailableEmployeesForGallery = useMemo(() => {
     const query = addSearchQuery.toLowerCase().trim();
@@ -1041,69 +921,27 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                 style={{ paddingLeft: '36px', width: '250px' }}
               />
             </div>
-            <div className='flex gap-2'>
-              {['All', 'Green', 'Blue', 'Orange', 'Yellow'].map(filter => (
-                <button 
-                  key={filter} 
-                  onClick={() => setSelectedShift(filter)}
-                  className={`btn ${selectedShift === filter ? 'btn-secondary' : 'btn-ghost'}`}
-                  style={{ 
-                    fontSize: '14px', 
-                    padding: '8px 20px',
-                    backgroundColor: selectedShift === filter ? '#eff6ff' : 'transparent',
-                    color: selectedShift === filter ? 'var(--accent-blue)' : 'inherit'
-                  }}
-                >
-                  {t(filterKeys[filter])}
-                </button>
-              ))}
-            </div>
-
-            {/* Modern Toggle Switch */}
-            <div 
-              onClick={() => setFilterNearDates(!filterNearDates)}
-              style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '12px', 
-                cursor: 'pointer',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                background: filterNearDates ? '#eff6ff' : '#f5f5f5',
-                border: `1px solid ${filterNearDates ? 'var(--accent-blue)' : '#e0e0e0'}`,
-                transition: 'all 0.2s ease',
-                userSelect: 'none'
-              }}
-            >
-              <div style={{
-                width: '44px',
-                height: '24px',
-                borderRadius: '12px',
-                background: filterNearDates ? 'var(--accent-blue)' : '#ccc',
-                position: 'relative',
-                transition: 'all 0.2s ease',
-                flexShrink: 0
-              }}>
-                <div style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '50%',
-                  background: 'white',
-                  position: 'absolute',
-                  top: '2px',
-                  left: filterNearDates ? '22px' : '2px',
-                  transition: 'all 0.2s ease',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                }} />
+            {/* Color shift filter only visible in pivot view */}
+            {viewMode === 'pivot' && (
+              <div className='flex gap-2'>
+                {['All', 'Green', 'Blue', 'Orange', 'Yellow'].map(filter => (
+                  <button 
+                    key={filter} 
+                    onClick={() => setSelectedShift(filter)}
+                    className={`btn ${selectedShift === filter ? 'btn-secondary' : 'btn-ghost'}`}
+                    style={{ 
+                      fontSize: '14px', 
+                      padding: '8px 20px',
+                      backgroundColor: selectedShift === filter ? '#eff6ff' : 'transparent',
+                      color: selectedShift === filter ? 'var(--accent-blue)' : 'inherit'
+                    }}
+                  >
+                    {t(filterKeys[filter])}
+                  </button>
+                ))}
               </div>
-              <span style={{ 
-                fontSize: '14px', 
-                fontWeight: '500',
-                color: filterNearDates ? 'var(--accent-blue)' : '#666'
-              }}>
-                {t('attendance.nearDatesFilter')}
-              </span>
-            </div>
+            )}
+
           </div>
           {/* Confirm and Reset Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1267,34 +1105,106 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                     </td>
                     {dates.map(date => (
                       <React.Fragment key={date}>
-                        <td style={{ padding: '8px', borderLeft: '1px solid #f5f5f5' }}>
+                        <td style={{ padding: '0', borderLeft: '1px solid #f5f5f5' }}>
                           <input 
-                            type='text' 
-                            defaultValue={emp.shifts[date]?.day || ''} 
+                            type='number' 
+                            step='0.5'
+                            min='0'
+                            value={emp.shifts[date]?.day || ''}
+                            key={`${emp.id}-${date}-day`}
+                            onChange={(e) => {
+                              // Update local state immediately for responsive typing
+                              const inputValue = e.target.value.trim();
+                              setEmployees(prevEmployees => 
+                                prevEmployees.map(e => {
+                                  if (e.id === emp.id) {
+                                    const newShifts = { ...e.shifts };
+                                    if (!newShifts[date]) {
+                                      newShifts[date] = { day: '', night: '' };
+                                    }
+                                    newShifts[date] = { ...newShifts[date], day: inputValue };
+                                    return { ...e, shifts: newShifts };
+                                  }
+                                  return e;
+                                })
+                              );
+                            }}
                             onBlur={(e) => {
                               const originalValue = emp.shifts[date]?.day || '';
-                              if (e.target.value !== originalValue) {
-                                handleShiftChange(emp, date, false, e.target.value);
-                                // Reset to original value if validation failed
-                                e.target.value = emp.shifts[date]?.day || '';
+                              const inputValue = e.target.value.trim();
+                              
+                              // Validate numeric input
+                              if (inputValue && (isNaN(Number(inputValue)) || Number(inputValue) < 0)) {
+                                return;
+                              }
+                              
+                              if (inputValue !== originalValue) {
+                                handleShiftChange(emp, date, false, inputValue);
                               }
                             }}
-                            style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
+                            style={{ 
+                              width: '100%',
+                              height: '100%',
+                              padding: '8px',
+                              textAlign: 'center', 
+                              border: 'none', 
+                              background: 'transparent', 
+                              outline: 'none',
+                              MozAppearance: 'textfield',
+                              WebkitAppearance: 'none',
+                              boxSizing: 'border-box'
+                            }}
                           />
                         </td>
-                        <td style={{ padding: '8px', borderLeft: '1px solid #f5f5f5' }}>
+                        <td style={{ padding: '0', borderLeft: '1px solid #f5f5f5' }}>
                           <input 
-                            type='text' 
-                            defaultValue={emp.shifts[date]?.night || ''} 
+                            type='number' 
+                            step='0.5'
+                            min='0'
+                            value={emp.shifts[date]?.night || ''}
+                            key={`${emp.id}-${date}-night`}
+                            onChange={(e) => {
+                              // Update local state immediately for responsive typing
+                              const inputValue = e.target.value.trim();
+                              setEmployees(prevEmployees => 
+                                prevEmployees.map(e => {
+                                  if (e.id === emp.id) {
+                                    const newShifts = { ...e.shifts };
+                                    if (!newShifts[date]) {
+                                      newShifts[date] = { day: '', night: '' };
+                                    }
+                                    newShifts[date] = { ...newShifts[date], night: inputValue };
+                                    return { ...e, shifts: newShifts };
+                                  }
+                                  return e;
+                                })
+                              );
+                            }}
                             onBlur={(e) => {
                               const originalValue = emp.shifts[date]?.night || '';
-                              if (e.target.value !== originalValue) {
-                                handleShiftChange(emp, date, true, e.target.value);
-                                // Reset to original value if validation failed
-                                e.target.value = emp.shifts[date]?.night || '';
+                              const inputValue = e.target.value.trim();
+                              
+                              // Validate numeric input
+                              if (inputValue && (isNaN(Number(inputValue)) || Number(inputValue) < 0)) {
+                                return;
+                              }
+                              
+                              if (inputValue !== originalValue) {
+                                handleShiftChange(emp, date, true, inputValue);
                               }
                             }}
-                            style={{ width: '100%', textAlign: 'center', border: 'none', background: 'transparent', outline: 'none' }}
+                            style={{ 
+                              width: '100%',
+                              height: '100%',
+                              padding: '8px',
+                              textAlign: 'center', 
+                              border: 'none', 
+                              background: 'transparent', 
+                              outline: 'none',
+                              MozAppearance: 'textfield',
+                              WebkitAppearance: 'none',
+                              boxSizing: 'border-box'
+                            }}
                           />
                         </td>
                       </React.Fragment>
@@ -1916,6 +1826,84 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
       {/* Adjustment Table shows auto-generated adjustments from shift edits */}
       <AdjustmentTable adjustments={adjustments} setAdjustments={setAdjustments} selectedShift={selectedShift} />
+      
+      {/* Custom Alert Modal for RBP Rules */}
+      {showAlertModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '0',
+            maxWidth: '600px',
+            width: '90%',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #e0e0e0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <span style={{ fontSize: '24px' }}>⚠️</span>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>LEGO RBP Rules</h3>
+            </div>
+            
+            {/* Content */}
+            <div style={{
+              padding: '24px 20px',
+              maxHeight: '400px',
+              overflowY: 'auto',
+              whiteSpace: 'pre-line',
+              lineHeight: '1.6'
+            }}>
+              {alertMessage}
+              <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e0e0e0', color: '#666' }}>
+                操作已取消。/ Operation cancelled.
+              </div>
+            </div>
+            
+            {/* Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #e0e0e0',
+              display: 'flex',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                onClick={() => {
+                  setShowAlertModal(false);
+                  setFailedInputKey(null);
+                }}
+                style={{
+                  padding: '10px 32px',
+                  backgroundColor: '#007AFF',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

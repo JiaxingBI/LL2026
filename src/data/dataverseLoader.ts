@@ -57,7 +57,9 @@ export async function fetchDataverseData(): Promise<DataverseData> {
       }),
       Jia_ll_dshiftplansService.getAll({
         select: ['jia_ll_dshiftplanid', 'jia_date', 'jia_daynightshift', 'jia_colorshift', 
-                 'jia_area', 'jia_department', 'statecode']
+                 'jia_area', 'jia_department', 'statecode'],
+        maxPageSize: 5000,
+        filter: `jia_date ge '2026-01-01' and jia_date le '2026-12-31'`
       }),
       Jia_ll_fattendancereocrdsService.getAll({
         select: ['jia_ll_fattendancereocrdid', 'jia_hours', 'jia_action', 'jia_daynightshift',
@@ -69,21 +71,6 @@ export async function fetchDataverseData(): Promise<DataverseData> {
     const shiftGroups = shiftGroupsResult.data || [];
     const shiftPlans = shiftPlansResult.data || [];
     const attendanceRecords = attendanceResult.data || [];
-
-    // Debug: log sample worktype values to understand the actual data format
-    if (employees.length > 0) {
-      const sampleWorktypes = employees.slice(0, 10).map(e => e.jia_worktype);
-      console.log('Sample jia_worktype values from Dataverse:', sampleWorktypes);
-    } else {
-      console.warn('No employees returned from Dataverse. Check table permissions and data.');
-    }
-
-    console.log('Dataverse raw counts:', {
-      employees: employees.length,
-      shiftGroups: shiftGroups.length,
-      shiftPlans: shiftPlans.length,
-      attendanceRecords: attendanceRecords.length
-    });
 
     return {
       employees,
@@ -217,28 +204,11 @@ export function transformDataverseData(data: DataverseData): TransformedData {
   
   let dateKeys: string[] = [];
   
-  if (dateObjects.length === 0) {
-    // No dates from shift plans, generate current month range
-    const now = new Date();
-    const currentMonth = now.getMonth() + 1;
-    const daysInMonth = new Date(year, currentMonth, 0).getDate();
-    for (let d = 1; d <= daysInMonth; d++) {
-      dateKeys.push(`${currentMonth}/${d}`);
-    }
-  } else {
-    // Find min and max dates
-    const minDate = new Date(Math.min(...dateObjects.map(d => d.getTime())));
-    const maxDate = new Date(Math.max(...dateObjects.map(d => d.getTime())));
-    
-    console.log(`Creating continuous date range from ${minDate.toISOString().split('T')[0]} to ${maxDate.toISOString().split('T')[0]}`);
-    
-    // Generate all dates in the range
-    const currentDate = new Date(minDate);
-    while (currentDate <= maxDate) {
-      const month = currentDate.getMonth() + 1;
-      const day = currentDate.getDate();
+  // Generate full year date range (January 1 to December 31)
+  for (let month = 1; month <= 12; month++) {
+    const daysInMonth = new Date(year, month, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
       dateKeys.push(`${month}/${day}`);
-      currentDate.setDate(currentDate.getDate() + 1);
     }
   }
 
@@ -249,24 +219,19 @@ export function transformDataverseData(data: DataverseData): TransformedData {
    *--------------------------------------------------------------------------*/
   const shiftPlanLookup = new Map<string, { day: Set<ShiftTeam>; night: Set<ShiftTeam> }>();
 
-  console.log('Building shift plan lookup from', data.shiftPlans.length, 'plans');
-
   for (const plan of data.shiftPlans) {
     if (!plan.jia_date || !plan.jia_colorshift) {
-      console.warn('Skipping plan with missing date or colorshift:', plan);
       continue;
     }
 
     // Parse date to dateKey
     const parts = plan.jia_date.split(/[-\/]/);
     if (parts.length < 3) {
-      console.warn('Invalid date format:', plan.jia_date);
       continue;
     }
     const month = parseInt(parts[1], 10);
     const day = parseInt(parts[2], 10);
     if (!month || !day) {
-      console.warn('Invalid month/day:', { month, day, date: plan.jia_date });
       continue;
     }
     const dateKey = `${month}/${day}`;
@@ -276,17 +241,12 @@ export function transformDataverseData(data: DataverseData): TransformedData {
     
     // Skip non-color shifts (e.g., "停线" = line stop)
     if (colorTeam === null) {
-      console.log(`Skipping non-color shift: ${plan.jia_colorshift} on ${dateKey}`);
       continue;
     }
 
     // Determine day/night - handle both English and Chinese
-    // English: "night", "Night", "NIGHT"
-    // Chinese: "夜班", "夜", "晚班"
     const shiftType = plan.jia_daynightshift?.toLowerCase() || '';
     const isNight = shiftType.includes('night') || shiftType.includes('夜') || shiftType.includes('晚');
-
-    console.log(`Plan entry: ${dateKey} ${isNight ? 'Night' : 'Day'} → ${colorTeam} (colorshift: ${plan.jia_colorshift}, daynightshift: ${plan.jia_daynightshift})`);
 
     // Add to lookup
     if (!shiftPlanLookup.has(dateKey)) {
@@ -300,29 +260,9 @@ export function transformDataverseData(data: DataverseData): TransformedData {
     }
   }
 
-  // Debug: log the final lookup map
-  console.log('Final shift plan lookup:');
-  for (const [dateKey, shifts] of shiftPlanLookup.entries()) {
-    const dayTeams = Array.from(shifts.day).join(', ') || 'none';
-    const nightTeams = Array.from(shifts.night).join(', ') || 'none';
-    console.log(`  ${dateKey}: Day=[${dayTeams}], Night=[${nightTeams}]`);
-  }
-
   // Transform employees - filter only by jia_worktype (no statecode filter)
   const eligibleEmployees = data.employees.filter(emp => isEligibleEmployeeWorkType(emp.jia_worktype));
   
-  // Debug: log filtering results
-  console.log('Employee filtering:', {
-    total: data.employees.length,
-    eligibleByWorktype: eligibleEmployees.length
-  });
-  
-  // If no eligible employees, show what worktypes exist so we can fix the filter
-  if (eligibleEmployees.length === 0 && data.employees.length > 0) {
-    const uniqueWorktypes = [...new Set(data.employees.map(e => e.jia_worktype).filter(Boolean))];
-    console.warn('No employees matched worktype filter. Existing worktypes:', uniqueWorktypes.slice(0, 20));
-  }
-
   const employees: Employee[] = eligibleEmployees
     .map(emp => {
       const shiftTeam = mapWorkTypeToShiftTeam(emp.jia_worktype) ?? 'Green';
