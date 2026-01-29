@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Search, Check, RotateCcw, Sun, Moon, Loader2 } from 'lucide-react';
 import { fetchDataverseData, transformDataverseData, createAttendanceRecord, type TransformedData } from '../data/dataverseLoader';
-import type { Employee, Adjustment } from '../types';
+import type { Employee, Adjustment, Role } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import { useLanguage } from '../contexts/LanguageContext';
 import { validateShiftChange } from '../utils/attendanceValidation';
+import { useUserPhotos } from '../hooks/useUserPhotos';
 
 /*******************************************************************************
  * DATA MODEL – Three-Table Architecture
@@ -165,7 +166,13 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   // Custom alert modal state
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
-  const [failedInputKey, setFailedInputKey] = useState<string | null>(null);
+  
+  // Gallery view edit mode toggle for employee info fields (Role, I/D, Status, Shift, Gender)
+  const [isGalleryEditMode, setIsGalleryEditMode] = useState(false);
+
+  // Pending leave: employees marked for leave but not yet confirmed
+  // Key format: "empId|dateKey|shiftType" to track per-slice
+  const [pendingLeaveIds, setPendingLeaveIds] = useState<Set<string>>(new Set());
 
   // Fetch data from Dataverse when SDK is initialized
   useEffect(() => {
@@ -231,12 +238,107 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
    * "Confirm" action.
    * Persists adjustments (OT/Leave) to ll_fAttendanceRecord in Dataverse,
    * then updates the local snapshot.
+   * Also processes pending leave employees: creates Leave adjustments and sets their hours to 0.
    */
   const handleConfirm = useCallback(async () => {
+    // First, process pending leave employees
+    // Convert pending leaves to actual adjustments and set hours to 0
+    const pendingLeaveArray = Array.from(pendingLeaveIds);
+    const leaveAdjustmentsToAdd: Adjustment[] = [];
+    
+    // Track which employee/date/shift combinations we've already processed to avoid duplicates
+    const processedLeaveKeys = new Set<string>();
+    
+    if (pendingLeaveArray.length > 0) {
+      // First pass: determine which adjustments to create (outside of setEmployees)
+      pendingLeaveArray.forEach(key => {
+        const [empId, dateKey, shiftType] = key.split('|');
+        const emp = employees.find(e => e.id === empId);
+        if (!emp) return;
+        
+        const isNight = shiftType === 'Night';
+        const dateStr = toIsoDateFromKey(planYear, dateKey);
+        const leaveKey = `${empId}|${dateStr}|${isNight}`;
+        
+        // Check if already exists in current adjustments state
+        const alreadyInAdjustments = adjustments.some(a => 
+          a.employeeId === empId && 
+          a.date === dateStr && 
+          a.isNight === isNight && 
+          a.adjustmentType === 'Leave'
+        );
+        
+        // Check if we've already added this in this batch
+        const alreadyProcessed = processedLeaveKeys.has(leaveKey);
+        
+        if (!alreadyInAdjustments && !alreadyProcessed) {
+          const shiftEntry = emp.shifts[dateKey];
+          const originalValue = isNight ? (shiftEntry?.night || '') : (shiftEntry?.day || '');
+          const originalHours = parseInt(originalValue) || 12;
+          
+          leaveAdjustmentsToAdd.push({
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+            employeeId: emp.id,
+            name: emp.name,
+            role: emp.role,
+            indirectDirect: emp.indirectDirect,
+            workStatus: emp.status,
+            shiftTeam: emp.shiftTeam,
+            gender: emp.gender,
+            date: dateStr,
+            isNight: isNight,
+            originalHours: originalHours,
+            hours: 0,
+            adjustmentType: 'Leave',
+            reason: 'Leave',
+            comments: ''
+          });
+          processedLeaveKeys.add(leaveKey);
+        }
+      });
+      
+      // Second pass: update employees' hours to 0 for pending leaves
+      setEmployees(prevEmployees => {
+        const updatedEmployees = [...prevEmployees];
+        pendingLeaveArray.forEach(key => {
+          const [empId, dateKey, shiftType] = key.split('|');
+          const empIndex = updatedEmployees.findIndex(e => e.id === empId);
+          if (empIndex >= 0) {
+            const emp = updatedEmployees[empIndex];
+            const isNight = shiftType === 'Night';
+            
+            // Set hours to 0
+            const newShifts = { ...emp.shifts };
+            if (!newShifts[dateKey]) {
+              newShifts[dateKey] = { day: '', night: '' };
+            }
+            if (isNight) {
+              newShifts[dateKey] = { ...newShifts[dateKey], night: '0' };
+            } else {
+              newShifts[dateKey] = { ...newShifts[dateKey], day: '0' };
+            }
+            updatedEmployees[empIndex] = { ...emp, shifts: newShifts };
+          }
+        });
+        return updatedEmployees;
+      });
+      
+      // Add leave adjustments
+      setAdjustments(prev => [...prev, ...leaveAdjustmentsToAdd]);
+      
+      // Clear pending leaves
+      setPendingLeaveIds(new Set());
+    }
+    
+    // Combine existing adjustments with new leave adjustments for saving
+    // Note: leaveAdjustmentsToAdd already added to state above, but state update is async
+    // So we need to manually combine for the save operation
+    const allAdjustmentsToSave = [...adjustments, ...leaveAdjustmentsToAdd];
+    
     // Only save NEW adjustments (those not yet persisted)
     // In a full implementation, we'd track which are already in Dataverse.
     // For now, we save all adjustments that don't have a Dataverse ID pattern.
-    const newAdjustments = adjustments.filter(adj => {
+    const newAdjustments = allAdjustmentsToSave.filter(adj => {
       // Local IDs are timestamp-based (numeric strings); Dataverse IDs are GUIDs
       return /^\d+$/.test(adj.id);
     });
@@ -272,15 +374,17 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setSavedAdjustments(JSON.parse(JSON.stringify(adjustments)));
     setHasChanges(false);
     alert(t('attendance.changesSaved') || 'Changes saved successfully!');
-  }, [employees, adjustments, t]);
+  }, [employees, adjustments, pendingLeaveIds, planYear, t]);
 
   /**
    * "Reset" action.
    * Reverts unsaved UI edits back to the last confirmed snapshot.
+   * Also clears pending leave employees.
    */
   const handleReset = useCallback(() => {
     setEmployees(JSON.parse(JSON.stringify(savedEmployees)));
     setAdjustments(JSON.parse(JSON.stringify(savedAdjustments)));
+    setPendingLeaveIds(new Set());
     setHasChanges(false);
   }, [savedEmployees, savedAdjustments]);
 
@@ -321,13 +425,30 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const validation = validateShiftChange(emp, date, isNight, newHours, employees, allDates);
     
     if (!validation.isValid) {
-      // Show violation alert - don't modify employee state or adjustments
+      // Show violation alert - revert employee state to original value
       const violationMessage = validation.violations.join('\n\n');
       setAlertMessage(violationMessage);
-      const inputKey = `${emp.id}-${date}-${isNight ? 'night' : 'day'}`;
-      setFailedInputKey(inputKey);
       setShowAlertModal(true);
-      return; // Don't proceed with the change - no state updates, no adjustment records
+      
+      // Revert employee state to original value (undo the onChange update)
+      setEmployees(prevEmployees => 
+        prevEmployees.map(e => {
+          if (e.id === emp.id) {
+            const newShifts = { ...e.shifts };
+            if (!newShifts[date]) {
+              newShifts[date] = { day: '', night: '' };
+            }
+            if (isNight) {
+              newShifts[date] = { ...newShifts[date], night: originalValue };
+            } else {
+              newShifts[date] = { ...newShifts[date], day: originalValue };
+            }
+            return { ...e, shifts: newShifts };
+          }
+          return e;
+        })
+      );
+      return; // Don't proceed with the change
     }
 
     // Update the employee's shift data
@@ -504,11 +625,16 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
    *--------------------------------------------------------------------------*/
   const scheduledIdsForSlice = useMemo(() => {
     const ids: string[] = [];
-    for (const emp of employees) {
+    
+    for (const emp of employees) {                                                                                    
       const shiftEntry = emp.shifts[selectedDateKey];
       const cellValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
       const parsed = parseInt(String(cellValue), 10);
-      if (Number.isFinite(parsed) && parsed > 0) ids.push(emp.id);
+      
+      // Include if has hours > 0
+      if (Number.isFinite(parsed) && parsed > 0) {
+        ids.push(emp.id);
+      }
     }
     return ids;
   }, [employees, selectedDateKey, selectedShiftType]);
@@ -517,8 +643,53 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
   const galleryEmployees = useMemo(() => {
     // Apply the same search + team filters to the gallery rows
-    return filteredEmployees.filter(emp => scheduledIdSet.has(emp.id));
-  }, [filteredEmployees, scheduledIdSet]);
+    // Exclude employees who are pending leave for this slice
+    return filteredEmployees.filter(emp => {
+      if (!scheduledIdSet.has(emp.id)) return false;
+      const pendingKey = `${emp.id}|${selectedDateKey}|${selectedShiftType}`;
+      if (pendingLeaveIds.has(pendingKey)) return false;
+      return true;
+    });
+  }, [filteredEmployees, scheduledIdSet, pendingLeaveIds, selectedDateKey, selectedShiftType]);
+
+  // Compute employees pending leave for the current slice
+  const pendingLeaveEmployeesForSlice = useMemo(() => {
+    return employees.filter(emp => {
+      const pendingKey = `${emp.id}|${selectedDateKey}|${selectedShiftType}`;
+      return pendingLeaveIds.has(pendingKey);
+    });
+  }, [employees, pendingLeaveIds, selectedDateKey, selectedShiftType]);
+
+  /** Toggle an employee's pending leave status for the current slice */
+  const togglePendingLeave = useCallback((empId: string) => {
+    const pendingKey = `${empId}|${selectedDateKey}|${selectedShiftType}`;
+    setPendingLeaveIds(prev => {
+      const next = new Set(prev);
+      if (next.has(pendingKey)) {
+        next.delete(pendingKey);
+      } else {
+        next.add(pendingKey);
+      }
+      return next;
+    });
+    setHasChanges(true);
+  }, [selectedDateKey, selectedShiftType]);
+
+  /** Recall (cancel) an employee from pending leave */
+  const recallFromPendingLeave = useCallback((empId: string) => {
+    const pendingKey = `${empId}|${selectedDateKey}|${selectedShiftType}`;
+    setPendingLeaveIds(prev => {
+      const next = new Set(prev);
+      next.delete(pendingKey);
+      return next;
+    });
+    // Check if there are still any pending changes
+    setHasChanges(prev => prev || pendingLeaveIds.size > 1);
+  }, [selectedDateKey, selectedShiftType, pendingLeaveIds]);
+
+  // Fetch user photos from Office365 for gallery employees
+  const galleryEmails = useMemo(() => galleryEmployees.map(emp => emp.email || '').filter(Boolean), [galleryEmployees]);
+  const { photos: userPhotos } = useUserPhotos(galleryEmails);
 
   const availableEmployeesForGallery = useMemo(() => {
     // Per spec: choose from whole list not currently in this gallery slice
@@ -543,75 +714,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
    * Adjustment that will eventually be persisted to ll_fAttendanceRecord.
    *--------------------------------------------------------------------------*/
 
-  /**
-   * Appends a new Adjustment record and marks the plan dirty.
-   * Uses a timestamp-based id for local uniqueness.
-   */
-  const addAdjustmentRecord = useCallback((payload: Omit<Adjustment, 'id'>) => {
-    const record: Adjustment = {
-      ...payload,
-      id: Date.now().toString()
-    };
-    setAdjustments(prev => [...prev, record]);
-    setHasChanges(true);
-  }, []);
-
   useEffect(() => {
     setGalleryHourDrafts({});
   }, [gallerySliceKey]);
 
-  /**
-   * Creates a Leave adjustment for the currently selected date + Day/Night slice.
-   * This record is destined for ll_fAttendanceRecord (not ll_dShiftPlan).
-   */
-  const handleLeaveClick = useCallback((emp: Employee) => {
-    const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
-    const shiftEntry = emp.shifts[selectedDateKey];
-    const originalValue = selectedShiftType === 'Day' ? (shiftEntry?.day || '') : (shiftEntry?.night || '');
-    const originalHours = parseInt(originalValue) || 0;
-
-    addAdjustmentRecord({
-      employeeId: emp.id,
-      name: emp.name,
-      role: emp.role,
-      indirectDirect: emp.indirectDirect,
-      workStatus: emp.status,
-      shiftTeam: emp.shiftTeam,
-      gender: emp.gender,
-      date: dateStr,
-      isNight: selectedShiftType === 'Night',
-      originalHours,
-      hours: 0,
-      adjustmentType: 'Leave',
-      reason: 'Leave',
-      comments: ''
-    });
-  }, [addAdjustmentRecord, planYear, selectedDateKey, selectedShiftType]);
-
-  /**
-   * Toggles Leave for the selected slice:
-   * - If a matching Leave adjustment exists, remove it.
-   * - Otherwise add one.
-   */
-  const toggleLeaveForEmployee = useCallback((emp: Employee) => {
-    const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
-    const isNight = selectedShiftType === 'Night';
-
-    const existing = adjustments.find(a =>
-      a.employeeId === emp.id &&
-      a.date === dateStr &&
-      a.isNight === isNight &&
-      a.adjustmentType === 'Leave'
-    );
-
-    if (existing) {
-      setAdjustments(prev => prev.filter(a => a.id !== existing.id));
-      setHasChanges(true);
-      return;
-    }
-
-    handleLeaveClick(emp);
-  }, [adjustments, handleLeaveClick, planYear, selectedDateKey, selectedShiftType]);
 
   /**
    * Bulk-adds selected employees into the current gallery slice by setting hours (defaults to 12).
@@ -1130,7 +1236,9 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                               );
                             }}
                             onBlur={(e) => {
-                              const originalValue = emp.shifts[date]?.day || '';
+                              // Compare against saved employees (original database value), not current state
+                              const savedEmp = savedEmployees.find(se => se.id === emp.id);
+                              const originalValue = savedEmp?.shifts[date]?.day || '';
                               const inputValue = e.target.value.trim();
                               
                               // Validate numeric input
@@ -1138,8 +1246,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                 return;
                               }
                               
+                              // Only trigger RBP validation and adjustment if value differs from original
                               if (inputValue !== originalValue) {
-                                handleShiftChange(emp, date, false, inputValue);
+                                // Find the saved employee for validation (with original hours)
+                                const empForValidation = savedEmp || emp;
+                                handleShiftChange(empForValidation, date, false, inputValue);
                               }
                             }}
                             style={{ 
@@ -1181,7 +1292,9 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                               );
                             }}
                             onBlur={(e) => {
-                              const originalValue = emp.shifts[date]?.night || '';
+                              // Compare against saved employees (original database value), not current state
+                              const savedEmp = savedEmployees.find(se => se.id === emp.id);
+                              const originalValue = savedEmp?.shifts[date]?.night || '';
                               const inputValue = e.target.value.trim();
                               
                               // Validate numeric input
@@ -1189,8 +1302,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                 return;
                               }
                               
+                              // Only trigger RBP validation and adjustment if value differs from original
                               if (inputValue !== originalValue) {
-                                handleShiftChange(emp, date, true, inputValue);
+                                // Find the saved employee for validation (with original hours)
+                                const empForValidation = savedEmp || emp;
+                                handleShiftChange(empForValidation, date, true, inputValue);
                               }
                             }}
                             style={{ 
@@ -1451,6 +1567,21 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                         🗑 Delete ({selectedRowIds.size})
                       </button>
                     )}
+                    <button
+                      className='btn'
+                      type='button'
+                      onClick={() => setIsGalleryEditMode(prev => !prev)}
+                      style={{ 
+                        padding: '4px 10px', 
+                        fontSize: '12px',
+                        background: isGalleryEditMode ? 'rgba(59, 130, 246, 0.12)' : '#f5f5f5',
+                        color: isGalleryEditMode ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                        border: `1px solid ${isGalleryEditMode ? 'rgba(59, 130, 246, 0.35)' : 'var(--border-color)'}`
+                      }}
+                      aria-pressed={isGalleryEditMode}
+                    >
+                      ✏️ {isGalleryEditMode ? t('attendance.editing') : t('attendance.edit')}
+                    </button>
                     <button className='btn btn-secondary' type='button' disabled style={{ opacity: 0.7, padding: '4px 10px', fontSize: '12px' }}>
                       {t('attendance.export')}
                     </button>
@@ -1460,7 +1591,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                       onClick={() => (showAddPicker ? closeAddWorkerModal() : setShowAddPicker(true))}
                       style={{ padding: '4px 10px', fontSize: '12px' }}
                     >
-                      {`+ ${t('attendance.addWorker')}`}
+                      {t('attendance.addWorker')}
                     </button>
                   </div>
                 </div>
@@ -1599,12 +1730,18 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                             padding: 10,
                             display: 'flex',
                             flexWrap: 'wrap',
-                            gap: 6,
+                            gap: 8,
                             alignContent: 'flex-start'
                           }}
                         >
                           {filteredAvailableEmployeesForGallery.map(emp => {
                             const isSelected = addEmployeeIds.has(emp.id);
+                            // Get border color based on shift team
+                            const shiftBorderColor = emp.shiftTeam === 'Green' ? '#22c55e' 
+                              : emp.shiftTeam === 'Blue' ? '#3b82f6' 
+                              : emp.shiftTeam === 'Orange' ? '#f97316' 
+                              : emp.shiftTeam === 'Yellow' ? '#eab308' 
+                              : '#e0e0e0';
                             return (
                               <button
                                 key={emp.id}
@@ -1612,32 +1749,32 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                 className='btn'
                                 type='button'
                                 style={{
-                                  padding: '4px 10px',
-                                  fontSize: '11px',
-                                  borderRadius: '16px',
-                                  border: isSelected ? '1px solid var(--accent-blue)' : '1px solid #e0e0e0',
+                                  padding: '6px 12px',
+                                  fontSize: '12px',
+                                  borderRadius: '8px',
+                                  border: isSelected ? '2px solid var(--accent-blue)' : `2px solid ${shiftBorderColor}`,
                                   background: isSelected ? '#eff6ff' : 'white',
                                   color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
                                   cursor: 'pointer',
-                                  display: 'flex',
+                                  display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '4px',
-                                  transition: 'all 0.15s ease'
+                                  justifyContent: 'flex-start',
+                                  gap: '8px',
+                                  transition: 'all 0.15s ease',
+                                  minWidth: '180px',
+                                  maxWidth: '220px',
+                                  textAlign: 'left'
                                 }}
                               >
-                                {isSelected && <span>✓</span>}
-                                <span style={{ fontWeight: 600 }}>{emp.id}</span>
-                                <span style={{ color: isSelected ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>{emp.name}</span>
-                                <span style={{
-                                  marginLeft: 6,
-                                  padding: '1px 6px',
-                                  borderRadius: 999,
-                                  background: 'rgba(0,0,0,0.06)',
-                                  fontSize: 10,
-                                  color: 'var(--text-secondary)'
-                                }}>
-                                  {emp.shiftTeam}
-                                </span>
+                                {isSelected && <span style={{ fontSize: '14px' }}>✓</span>}
+                                <span style={{ fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', minWidth: '50px' }}>{emp.id}</span>
+                                <span style={{ 
+                                  color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  flex: 1
+                                }}>{emp.name}</span>
                               </button>
                             );
                           })}
@@ -1662,18 +1799,18 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                             type='checkbox'
                             checked={galleryEmployees.length > 0 && selectedRowIds.size === galleryEmployees.length}
                             onChange={toggleSelectAll}
-                            style={{ cursor: 'pointer', width: '14px', height: '14px' }}
+                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
                           />
                         </th>
-                        <th style={{ width: '90px', padding: '6px 8px' }}>{t('attendance.id')}</th>
-                        <th style={{ width: '180px', padding: '6px 8px' }}>{t('attendance.name')}</th>
-                        <th style={{ width: '70px', padding: '6px 8px' }}>{t('attendance.role')}</th>
-                        <th style={{ width: '60px', padding: '6px 8px' }}>{t('attendance.id_status')}</th>
-                        <th style={{ width: '70px', padding: '6px 8px' }}>{t('attendance.status')}</th>
-                        <th style={{ width: '60px', padding: '6px 8px' }}>{t('attendance.shift')}</th>
-                        <th style={{ width: '60px', padding: '6px 8px' }}>{t('attendance.gender')}</th>
-                        <th style={{ width: '80px', padding: '6px 8px' }}>{t('attendance.workingHour')}</th>
-                        <th style={{ width: '70px', padding: '6px 8px' }}>{t('attendance.actions')}</th>
+                        <th style={{ width: '100px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.id')}</th>
+                        <th style={{ width: '200px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.name')}</th>
+                        <th style={{ width: '90px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.role')}</th>
+                        <th style={{ width: '80px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.id_status')}</th>
+                        <th style={{ width: '90px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.status')}</th>
+                        <th style={{ width: '80px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.shift')}</th>
+                        <th style={{ width: '80px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.gender')}</th>
+                        <th style={{ width: '90px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.workingHour')}</th>
+                        <th style={{ width: '90px', padding: '10px 12px', fontSize: '14px' }}>{t('attendance.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1700,14 +1837,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                           const storedHours = Number.isFinite(storedParsed) && storedParsed > 0 ? String(storedParsed) : '';
                           const displayValue = draft ? draft.value : (storedHours || '12');
 
-                          const dateStr = toIsoDateFromKey(planYear, selectedDateKey);
-                          const leaveOn = adjustments.some(a =>
-                            a.employeeId === emp.id &&
-                            a.date === dateStr &&
-                            a.isNight === isNight &&
-                            a.adjustmentType === 'Leave'
-                          );
                           const isRowSelected = selectedRowIds.has(emp.id);
+                          const userPhoto = emp.email ? userPhotos.get(emp.email) : null;
                           return (
                             <tr 
                               key={emp.id}
@@ -1716,47 +1847,130 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                 transition: 'background 0.15s ease'
                               }}
                             >
-                              <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                                 <input
                                   type='checkbox'
                                   checked={isRowSelected}
                                   onChange={() => toggleRowSelection(emp.id)}
-                                  style={{ cursor: 'pointer', width: '14px', height: '14px' }}
+                                  style={{ cursor: 'pointer', width: '18px', height: '18px' }}
                                 />
                               </td>
-                              <td style={{ color: 'var(--text-secondary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '12px', padding: '4px 8px' }}>
+                              <td style={{ color: 'var(--text-secondary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '14px', padding: '8px 12px' }}>
                                 {emp.id}
                               </td>
-                              <td style={{ padding: '4px 8px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <div
-                                    style={{
-                                      width: '26px',
-                                      height: '26px',
-                                      borderRadius: '999px',
-                                      border: '1px solid var(--border-color)',
-                                      background: 'white',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '10px',
-                                      fontWeight: 800,
-                                      color: 'var(--text-secondary)'
-                                    }}
-                                  >
-                                    {initials}
-                                  </div>
-                                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{emp.name}</span>
+                              <td style={{ padding: '8px 12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  {userPhoto ? (
+                                    <img
+                                      src={userPhoto}
+                                      alt={emp.name}
+                                      style={{
+                                        width: '36px',
+                                        height: '36px',
+                                        borderRadius: '999px',
+                                        border: '1px solid var(--border-color)',
+                                        objectFit: 'cover'
+                                      }}
+                                    />
+                                  ) : (
+                                    <div
+                                      style={{
+                                        width: '36px',
+                                        height: '36px',
+                                        borderRadius: '999px',
+                                        border: '1px solid var(--border-color)',
+                                        background: 'white',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '13px',
+                                        fontWeight: 800,
+                                        color: 'var(--text-secondary)'
+                                      }}
+                                    >
+                                      {initials}
+                                    </div>
+                                  )}
+                                  <span style={{ fontWeight: 600, fontSize: '15px' }}>{emp.name}</span>
                                 </div>
                               </td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.role}</td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.indirectDirect}</td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.status}</td>
-                              <td style={{ padding: '4px 8px' }}>
-                                <span className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ fontSize: '11px', padding: '2px 6px' }}>{emp.shiftTeam}</span>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
+                                {isGalleryEditMode ? (
+                                  <select 
+                                    value={emp.role} 
+                                    onChange={(e) => handleEmployeeUpdate(emp.id, 'role', e.target.value as Role)}
+                                    style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    <option value="TC.L1">TC.L1</option>
+                                    <option value="TC.L2">TC.L2</option>
+                                    <option value="TC.L3">TC.L3</option>
+                                    <option value="Hall Asist">Hall Asist</option>
+                                    <option value="Infeeder">Infeeder</option>
+                                    <option value="Sr.Infeeder">Sr.Infeeder</option>
+                                    <option value="Ops.L1">Ops.L1</option>
+                                  </select>
+                                ) : emp.role}
                               </td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '12px', padding: '4px 8px' }}>{emp.gender}</td>
-                              <td style={{ padding: '4px 8px' }}>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
+                                {isGalleryEditMode ? (
+                                  <select 
+                                    value={emp.indirectDirect} 
+                                    onChange={(e) => handleEmployeeUpdate(emp.id, 'indirectDirect', e.target.value)}
+                                    style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    <option value="Direct">Direct</option>
+                                    <option value="Indirect">Indirect</option>
+                                  </select>
+                                ) : emp.indirectDirect}
+                              </td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
+                                {isGalleryEditMode ? (
+                                  <select 
+                                    value={emp.status} 
+                                    onChange={(e) => handleEmployeeUpdate(emp.id, 'status', e.target.value)}
+                                    style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    <option value="Prod.">Prod.</option>
+                                    <option value="Jail">Jail</option>
+                                    <option value="DailyProduction">DailyProduction</option>
+                                  </select>
+                                ) : emp.status}
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                {isGalleryEditMode ? (
+                                  <select 
+                                    value={emp.shiftTeam} 
+                                    onChange={(e) => handleEmployeeUpdate(emp.id, 'shiftTeam', e.target.value)}
+                                    className={`badge ${getShiftClass(emp.shiftTeam)}`}
+                                    style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer', fontSize: '13px' }}
+                                  >
+                                    <option value="Green">{t('filter.green')}</option>
+                                    <option value="Blue">{t('filter.blue')}</option>
+                                    <option value="Orange">{t('filter.orange')}</option>
+                                    <option value="Yellow">{t('filter.yellow')}</option>
+                                  </select>
+                                ) : (
+                                  <span className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ fontSize: '13px', padding: '4px 10px' }}>
+                                    {emp.shiftTeam === 'Green' ? t('filter.green') : 
+                                     emp.shiftTeam === 'Blue' ? t('filter.blue') : 
+                                     emp.shiftTeam === 'Orange' ? t('filter.orange') : 
+                                     emp.shiftTeam === 'Yellow' ? t('filter.yellow') : emp.shiftTeam}
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
+                                {isGalleryEditMode ? (
+                                  <select 
+                                    value={emp.gender} 
+                                    onChange={(e) => handleEmployeeUpdate(emp.id, 'gender', e.target.value)}
+                                    style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                  </select>
+                                ) : emp.gender}
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
                                 <input
                                   type='number'
                                   min={0}
@@ -1783,30 +1997,35 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                       return;
                                     }
 
+                                    // Call handleShiftChange - if validation fails, it shows alert and returns early
+                                    // The state update inside handleShiftChange will trigger re-render
                                     handleShiftChange(emp, selectedDateKey, isNight, nextValue);
-                                    // Reset to original value if validation failed
+                                    
+                                    // Clear the draft after attempting change
+                                    // If validation passed, employee state is updated and displayValue will reflect new value
+                                    // If validation failed, employee state unchanged, displayValue still shows original
                                     setGalleryHourDrafts(prev => ({
                                       ...prev,
-                                      [draftKey]: { value: String(storedRaw || ''), touched: false }
+                                      [draftKey]: { value: '', touched: false }
                                     }));
                                   }}
-                                  style={{ width: '60px', height: '26px', fontSize: '12px' }}
+                                  style={{ width: '70px', height: '32px', fontSize: '14px' }}
                                 />
                               </td>
-                              <td style={{ padding: '4px 8px' }}>
+                              <td style={{ padding: '8px 12px' }}>
                                 <button
-                                  onClick={() => toggleLeaveForEmployee(emp)}
+                                  onClick={() => togglePendingLeave(emp.id)}
                                   className='btn'
                                   type='button'
                                   style={{
-                                    padding: '3px 8px',
-                                    fontSize: '11px',
-                                    backgroundColor: leaveOn ? 'rgba(255, 59, 48, 0.12)' : '#f5f5f5',
-                                    color: leaveOn ? 'var(--danger)' : 'var(--text-secondary)',
-                                    border: `1px solid ${leaveOn ? 'rgba(255, 59, 48, 0.35)' : 'var(--border-color)'}`,
-                                    cursor: 'pointer'
+                                    padding: '6px 12px',
+                                    fontSize: '13px',
+                                    backgroundColor: '#fff3e0',
+                                    color: '#e65100',
+                                    border: '1px solid #ffcc80',
+                                    cursor: 'pointer',
+                                    borderRadius: '4px'
                                   }}
-                                  aria-pressed={leaveOn}
                                 >
                                   {t('adjustment.leave')}
                                 </button>
@@ -1818,6 +2037,129 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                     </tbody>
                   </table>
                 </div>
+
+                {/* Pending Leave Workers Section - 请假人员 */}
+                {pendingLeaveEmployeesForSlice.length > 0 && (
+                  <div style={{
+                    marginTop: '16px',
+                    border: '1px solid #ffcc80',
+                    borderRadius: '8px',
+                    backgroundColor: '#fff8e1'
+                  }}>
+                    <div style={{
+                      padding: '10px 16px',
+                      borderBottom: '1px solid #ffcc80',
+                      backgroundColor: '#fff3e0',
+                      borderRadius: '8px 8px 0 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <span style={{ fontSize: '15px', fontWeight: 600, color: '#e65100' }}>
+                        {t('attendance.leaveSection')}
+                      </span>
+                      <span style={{
+                        backgroundColor: '#e65100',
+                        color: '#fff',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: 500
+                      }}>
+                        {pendingLeaveEmployeesForSlice.length}
+                      </span>
+                      <span style={{ fontSize: '12px', color: '#bf360c', marginLeft: 'auto' }}>
+                        {t('attendance.pendingConfirm')}
+                      </span>
+                    </div>
+                    <div style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                      {pendingLeaveEmployeesForSlice.map(emp => {
+                        const shiftTeamColor = emp.shiftTeam === 'Green' ? '#22c55e' 
+                          : emp.shiftTeam === 'Blue' ? '#3b82f6' 
+                          : emp.shiftTeam === 'Orange' ? '#f97316' 
+                          : emp.shiftTeam === 'Yellow' ? '#eab308' 
+                          : '#999';
+                        const photoUrl = userPhotos.get(emp.email || '');
+                        return (
+                          <div
+                            key={emp.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px',
+                              padding: '8px 12px',
+                              border: `2px solid ${shiftTeamColor}`,
+                              borderRadius: '8px',
+                              backgroundColor: '#fff',
+                              minWidth: '200px'
+                            }}
+                          >
+                            {/* Avatar */}
+                            <div style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: '50%',
+                              backgroundColor: shiftTeamColor,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#fff',
+                              fontWeight: 600,
+                              fontSize: '13px',
+                              overflow: 'hidden',
+                              flexShrink: 0
+                            }}>
+                              {photoUrl ? (
+                                <img
+                                  src={photoUrl}
+                                  alt={emp.name}
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                              ) : (
+                                emp.name.charAt(0).toUpperCase()
+                              )}
+                            </div>
+                            
+                            {/* Info */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                color: '#333',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}>
+                                {emp.name}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#666' }}>
+                                {emp.id}
+                              </div>
+                            </div>
+                            
+                            {/* Recall button */}
+                            <button
+                              onClick={() => recallFromPendingLeave(emp.id)}
+                              style={{
+                                padding: '5px 10px',
+                                border: 'none',
+                                borderRadius: '4px',
+                                backgroundColor: '#4caf50',
+                                color: '#fff',
+                                fontSize: '12px',
+                                fontWeight: 500,
+                                cursor: 'pointer',
+                                flexShrink: 0
+                              }}
+                            >
+                              {t('attendance.cancelLeave')}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1885,7 +2227,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
               <button
                 onClick={() => {
                   setShowAlertModal(false);
-                  setFailedInputKey(null);
                 }}
                 style={{
                   padding: '10px 32px',

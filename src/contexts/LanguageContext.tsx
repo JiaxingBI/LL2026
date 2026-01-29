@@ -70,6 +70,15 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.workingHour': 'Working hour',
     'attendance.actions': 'Actions',
     'attendance.noEmployeesInSlice': 'No employees in this date/shift view.',
+    'attendance.edit': 'Edit',
+    'attendance.editing': 'Editing',
+    'attendance.selected': 'Selected',
+    'attendance.close': 'Close',
+    'attendance.addSelected': 'Add',
+    'attendance.leaveSection': 'Leave Workers',
+    'attendance.cancelLeave': 'Recall',
+    'attendance.noLeaveWorkers': 'No workers on leave.',
+    'attendance.pendingConfirm': 'Pending confirmation',
     
     // Filters
     'filter.all': 'All',
@@ -206,6 +215,15 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.workingHour': '工时',
     'attendance.actions': '操作',
     'attendance.noEmployeesInSlice': '该日期/班次没有员工。',
+    'attendance.edit': '编辑',
+    'attendance.editing': '编辑中',
+    'attendance.selected': '已选',
+    'attendance.close': '关闭',
+    'attendance.addSelected': '添加',
+    'attendance.leaveSection': '请假人员',
+    'attendance.cancelLeave': '召回',
+    'attendance.noLeaveWorkers': '暂无请假人员',
+    'attendance.pendingConfirm': '待确认',
     
     // Filters
     'filter.all': '全部',
@@ -287,7 +305,7 @@ const translations: Record<Language, Record<string, string>> = {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>('en');
+  const [language, setLanguage] = useState<Language>('zh');
 
   const t = (key: string): string => {
     return translations[language][key] || key;

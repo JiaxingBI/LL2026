@@ -194,6 +194,22 @@ td {
   box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
 }
 
+/* Hide number input spinners/step buttons globally */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Pivot table number inputs - zero padding */
+.table-container table input[type="number"] {
+  padding: 0;
+}
+
 /* Grid System */
 .grid { display: grid; gap: 24px; }
 .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }

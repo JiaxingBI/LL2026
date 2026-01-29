@@ -288,6 +288,7 @@ export function transformDataverseData(data: DataverseData): TransformedData {
       return {
         id: emp.jia_empid || emp.jia_ll_demployeeid,
         name: emp.jia_preferredname || emp.jia_name || 'Unknown',
+        email: emp.jia_email || '',
         role: mapWorkTypeToRole(emp.jia_worktype),
         indirectDirect: 'Direct' as const,
         status: mapEmployeeStatusToWorkStatus(emp.jia_employeestatus),
