@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@microsoft/power-apps": "^0.3.21",
+    "@tanstack/react-virtual": "^3.13.22",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

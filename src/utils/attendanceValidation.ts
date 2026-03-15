@@ -10,6 +10,17 @@
 
 import type { Employee } from '../types';
 
+/**
+ * Returns the current date/time in UTC+8 (factory local time).
+ * Used by all rule checks that need a "today" reference so results
+ * are consistent regardless of the browser's local timezone.
+ */
+function getUtc8Now(): Date {
+  const now = new Date();
+  const utcMillis = now.getTime() + now.getTimezoneOffset() * 60_000;
+  return new Date(utcMillis + 8 * 60 * 60_000);
+}
+
 export interface ValidationResult {
   isValid: boolean;
   violations: string[];
@@ -115,7 +126,7 @@ function checkWeeklyHours(
   newHours: number,
   _dateKeys: string[]
 ): string | null {
-  const year = new Date().getFullYear();
+  const year = getUtc8Now().getFullYear();
   const [targetMonth, targetDay] = targetDate.split('/').map(Number);
   const targetDateObj = new Date(year, targetMonth - 1, targetDay);
 
@@ -171,7 +182,7 @@ function checkConsecutiveWorkDays(
   _newHours: number,
   _dateKeys: string[]
 ): string | null {
-  const year = new Date().getFullYear();
+  const year = getUtc8Now().getFullYear();
   const [targetMonth, targetDay] = targetDate.split('/').map(Number);
   const targetDateObj = new Date(year, targetMonth - 1, targetDay);
 
@@ -231,7 +242,7 @@ function checkRestTimeBetweenShifts(
     return `规则违反：每次上班时间不得超过14小时。当前输入 ${newHours} 小时。\n(Rule violation: Each work session should not exceed 14 hours. Current input is ${newHours} hours.)`;
   }
 
-  const year = new Date().getFullYear();
+  const year = getUtc8Now().getFullYear();
   const [targetMonth, targetDay] = targetDate.split('/').map(Number);
   const targetDateObj = new Date(year, targetMonth - 1, targetDay);
 

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Plus, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import type { Adjustment } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import CustomDatePicker from './ui/CustomDatePicker';
+import CustomSelect from './ui/CustomSelect';
 
 interface AdjustmentTableProps {
   adjustments: Adjustment[];
@@ -12,16 +14,6 @@ interface AdjustmentTableProps {
 export default function AdjustmentTable({ adjustments, setAdjustments, selectedShift }: AdjustmentTableProps) {
   const { t } = useLanguage();
   const [isExpanded, setIsExpanded] = useState(false);
-
-  const getShiftClass = (team: string) => {
-    switch (team) {
-      case 'Green': return 'badge-green';
-      case 'Blue': return 'badge-blue';
-      case 'Orange': return 'badge-orange';
-      case 'Yellow': return 'badge-yellow';
-      default: return '';
-    }
-  };
 
   // Filter adjustments by selected shift
   const filteredAdjustments = selectedShift === 'All' 
@@ -111,81 +103,78 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                       />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '120px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
-                      <select 
-                        value={adj.role || ''} 
-                        onChange={(e) => updateAdjustment(adj.id, 'role', e.target.value)}
-                        style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}
-                      >
-                        <option value="TC.L1">TC.L1</option>
-                        <option value="TC.L2">TC.L2</option>
-                        <option value="TC.L3">TC.L3</option>
-                        <option value="Hall Asist">Hall Asist</option>
-                        <option value="Infeeder">Infeeder</option>
-                        <option value="Sr.Infeeder">Sr.Infeeder</option>
-                        <option value="Ops.L1">Ops.L1</option>
-                      </select>
+                      <CustomSelect
+                        compact
+                        value={adj.role || ''}
+                        onChange={(v) => updateAdjustment(adj.id, 'role', v)}
+                        options={['TC.L1','TC.L2','TC.L3','Hall Asist','Infeeder','Sr.Infeeder','Ops.L1'].map(r => ({ value: r, label: r }))}
+                      />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '190px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
-                      <select 
-                        value={adj.indirectDirect || 'Direct'} 
-                        onChange={(e) => updateAdjustment(adj.id, 'indirectDirect', e.target.value)}
-                        style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}
-                      >
-                        <option value="Direct">{t('id.direct')}</option>
-                        <option value="Indirect">{t('id.indirect')}</option>
-                      </select>
+                      <CustomSelect
+                        compact
+                        value={adj.indirectDirect || 'Direct'}
+                        onChange={(v) => updateAdjustment(adj.id, 'indirectDirect', v)}
+                        options={[
+                          { value: 'Direct', label: t('id.direct') },
+                          { value: 'Indirect', label: t('id.indirect') },
+                        ]}
+                      />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '260px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
-                      <select 
-                        value={adj.workStatus || 'Prod.'} 
-                        onChange={(e) => updateAdjustment(adj.id, 'workStatus', e.target.value)}
-                        style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}
-                      >
-                        <option value="Prod.">Prod.</option>
-                        <option value="Jail">Jail</option>
-                        <option value="DailyProduction">DailyProduction</option>
-                      </select>
+                      <CustomSelect
+                        compact
+                        value={adj.workStatus || 'Prod.'}
+                        onChange={(v) => updateAdjustment(adj.id, 'workStatus', v)}
+                        options={[
+                          { value: 'Prod.', label: 'Prod.' },
+                          { value: 'Jail', label: 'Jail' },
+                          { value: 'DailyProduction', label: 'DailyProduction' },
+                        ]}
+                      />
                     </td>
                     <td style={{ position: 'sticky', left: '330px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
-                      <select 
-                        value={adj.shiftTeam || 'Green'} 
-                        onChange={(e) => updateAdjustment(adj.id, 'shiftTeam', e.target.value)}
-                        className={`badge ${getShiftClass(adj.shiftTeam || '')}`} 
-                        style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}
-                      >
-                        <option value="Green">{t('filter.green')}</option>
-                        <option value="Blue">{t('filter.blue')}</option>
-                        <option value="Orange">{t('filter.orange')}</option>
-                        <option value="Yellow">{t('filter.yellow')}</option>
-                      </select>
+                      <CustomSelect
+                        compact
+                        value={adj.shiftTeam || 'Green'}
+                        onChange={(v) => updateAdjustment(adj.id, 'shiftTeam', v)}
+                        options={[
+                          { value: 'Green', label: t('filter.green') },
+                          { value: 'Blue', label: t('filter.blue') },
+                          { value: 'Orange', label: t('filter.orange') },
+                          { value: 'Yellow', label: t('filter.yellow') },
+                        ]}
+                      />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '400px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px', boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>
-                      <select 
-                        value={adj.gender || 'Male'} 
-                        onChange={(e) => updateAdjustment(adj.id, 'gender', e.target.value)}
-                        style={{ border: 'none', background: 'transparent', outline: 'none', color: '#666', cursor: 'pointer' }}
-                      >
-                        <option value="Male">{t('gender.male')}</option>
-                        <option value="Female">{t('gender.female')}</option>
-                      </select>
-                    </td>
-                    <td>
-                      <input 
-                        type="date" 
-                        value={adj.date}
-                        onChange={(e) => updateAdjustment(adj.id, 'date', e.target.value)}
-                        style={{ border: 'none', background: 'transparent', fontFamily: 'inherit', outline: 'none' }}
+                      <CustomSelect
+                        compact
+                        value={adj.gender || 'Male'}
+                        onChange={(v) => updateAdjustment(adj.id, 'gender', v)}
+                        options={[
+                          { value: 'Male', label: t('gender.male') },
+                          { value: 'Female', label: t('gender.female') },
+                        ]}
                       />
                     </td>
                     <td>
-                      <select 
+                      <CustomDatePicker
+                        compact
+                        value={adj.date}
+                        onChange={(nextValue) => updateAdjustment(adj.id, 'date', nextValue)}
+                        minWidth={140}
+                      />
+                    </td>
+                    <td>
+                      <CustomSelect
+                        compact
                         value={adj.isNight ? 'Night' : 'Day'}
-                        onChange={(e) => updateAdjustment(adj.id, 'isNight', e.target.value === 'Night')}
-                        style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}
-                      >
-                        <option value="Day">{t('attendance.day')}</option>
-                        <option value="Night">{t('attendance.night')}</option>
-                      </select>
+                        onChange={(v) => updateAdjustment(adj.id, 'isNight', v === 'Night')}
+                        options={[
+                          { value: 'Day', label: t('attendance.day') },
+                          { value: 'Night', label: t('attendance.night') },
+                        ]}
+                      />
                     </td>
                     <td>
                       <input 
@@ -196,16 +185,17 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                       />
                     </td>
                     <td>
-                      <select 
+                      <CustomSelect
+                        compact
                         value={adj.reason}
-                        onChange={(e) => updateAdjustment(adj.id, 'reason', e.target.value)}
-                        style={{ border: 'none', background: 'transparent', outline: 'none', cursor: 'pointer' }}
-                      >
-                        <option value="Overtime">{t('adjustment.overtime')}</option>
-                        <option value="Leave">{t('adjustment.leave')}</option>
-                        <option value="Transfer">{t('adjustment.transfer')}</option>
-                        <option value="Edit">{t('adjustment.edit')}</option>
-                      </select>
+                        onChange={(v) => updateAdjustment(adj.id, 'reason', v)}
+                        options={[
+                          { value: 'Overtime', label: t('adjustment.overtime') },
+                          { value: 'Leave', label: t('adjustment.leave') },
+                          { value: 'Transfer', label: t('adjustment.transfer') },
+                          { value: 'Edit', label: t('adjustment.edit') },
+                        ]}
+                      />
                     </td>
                     <td>
                       <input 

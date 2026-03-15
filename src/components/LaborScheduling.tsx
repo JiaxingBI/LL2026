@@ -1,18 +1,16 @@
 import { useState, useRef, useMemo } from 'react';
-import { Users, Plus, MessageSquare, Trash2, ChevronDown, Search, X, MessageCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Users, Plus, MessageSquare, Trash2, Search, X, MessageCircle, RefreshCw } from 'lucide-react';
 import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { AssemblyLine, Employee } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { DEFAULT_ASSEMBLY_LINES } from '../constants/assemblyLines';
+import { EmptyState } from './ui/EmptyState';
+import { CardSkeleton } from './ui/Skeleton';
+import CustomSelect from './ui/CustomSelect';
+import { renderShiftSelectOption, renderShiftSelectValue } from '../utils/shiftSelectRenderers';
 
-// Default assembly lines structure
-const defaultAssemblyLines: AssemblyLine[] = [
-  { id: 'L1', name: 'L1 - Assembly Line 1', capacity: 8, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L2', name: 'L2 - Assembly Line 2', capacity: 10, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L3', name: 'L3 - Assembly Line 3', capacity: 6, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L4', name: 'L4 - Assembly Line 4', capacity: 12, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L5', name: 'L5 - Assembly Line 5', capacity: 8, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L6', name: 'L6 - Assembly Line 6', capacity: 10, currentWorkers: 0, assignedWorkers: [] },
-];
+// Default assembly lines — shared with EmployeeView
+const defaultAssemblyLines: AssemblyLine[] = DEFAULT_ASSEMBLY_LINES;
 
 interface LaborSchedulingProps {
   isInitialized?: boolean;
@@ -60,25 +58,20 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
   // Filter employees based on selected date/shift - only show those with attendance
   const availableEmployees = useMemo(() => {
     if (!selectedShift) return employees;
-    
-    const [dateStr, shiftType] = selectedShift.split('-').length > 3 
-      ? [selectedShift.substring(0, 10), selectedShift.substring(11)]
-      : selectedShift.split('-').slice(0, 3).join('-').split('-').slice(0, 3).join('-') === selectedShift.substring(0, 10)
-        ? [selectedShift.substring(0, 10), selectedShift.split('-').pop() || '']
-        : ['', ''];
-    
-    // Parse the date to get month-day format for shifts lookup
+
+    // Value format: "YYYY-MM-DD-day" or "YYYY-MM-DD-night"
+    // Split on the last '-' to isolate the shift suffix reliably.
+    const lastDash = selectedShift.lastIndexOf('-');
+    const dateStr  = selectedShift.substring(0, lastDash);      // e.g. "2026-03-15"
+    const shiftType = selectedShift.substring(lastDash + 1);    // "day" or "night"
+
     const date = new Date(dateStr);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const shiftKey = `${month}/${day}`;
+    const shiftKey = `${date.getMonth() + 1}/${date.getDate()}`;
     const isNight = shiftType === 'night';
-    
+
     return employees.filter(employee => {
       const shiftEntry = employee.shifts[shiftKey];
       if (!shiftEntry) return false;
-      
-      // Check if the employee has a numeric value (hours) for the selected shift
       const shiftValue = isNight ? shiftEntry.night : shiftEntry.day;
       const numValue = parseFloat(shiftValue);
       return !isNaN(numValue) && numValue > 0;
@@ -254,10 +247,8 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
   // Loading state
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px' }}>
-        <Loader2 size={48} style={{ animation: 'spin 1s linear infinite' }} />
-        <p style={{ color: 'var(--text-secondary)' }}>{t('common.loading') || 'Loading employees from Dataverse...'}</p>
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+        {Array.from({ length: 6 }).map((_, i) => <CardSkeleton key={i} />)}
       </div>
     );
   }
@@ -339,30 +330,15 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
 
       {/* Action Bar */}
       <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-        <div className="flex items-center gap-2" style={{ position: 'relative' }}>
-          <select
-            value={selectedShift}
-            onChange={(e) => setSelectedShift(e.target.value)}
-            style={{ 
-              padding: '8px 36px 8px 12px', 
-              border: '1px solid var(--border-color)', 
-              borderRadius: '8px', 
-              fontSize: '14px',
-              fontFamily: 'inherit',
-              cursor: 'pointer',
-              appearance: 'none',
-              background: 'white',
-              minWidth: '220px'
-            }}
-          >
-            {shiftOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} />
-        </div>
+        <CustomSelect
+          standalone
+          value={selectedShift}
+          onChange={(v) => setSelectedShift(v)}
+          options={shiftOptions}
+          minWidth="220px"
+          renderValue={renderShiftSelectValue}
+          renderOption={renderShiftSelectOption}
+        />
         <div className="flex" style={{ gap: '12px' }}>
           <button 
             onClick={() => refetch()}
@@ -693,11 +669,14 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
                 
                 if (filteredEmployees.length === 0) {
                   return (
-                    <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                      {allAssignedIds.length > 0 && availableEmployees.filter(emp => !allAssignedIds.includes(emp.id)).length === 0
-                        ? 'All employees are assigned'
-                        : 'No employees found'}
-                    </div>
+                    <EmptyState
+                      title={
+                        allAssignedIds.length > 0 &&
+                        availableEmployees.filter(emp => !allAssignedIds.includes(emp.id)).length === 0
+                          ? 'All employees are assigned'
+                          : 'No employees found'
+                      }
+                    />
                   );
                 }
                 

@@ -5,7 +5,7 @@
  * Photos are cached to avoid redundant API calls.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Office365UsersService } from '../generated/services/Office365UsersService';
 
 // Cache for user photos to avoid refetching
@@ -83,27 +83,30 @@ export function useUserPhotos(emails: string[]): {
   const [photos, setPhotos] = useState<Map<string, string | null>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
 
+  // Build a stable, sorted string key so the effect only re-runs when
+  // the set of emails actually changes, not just reference identity.
+  const emailKey = useMemo(() => emails.slice().sort().join(','), [emails]);
+
   useEffect(() => {
-    if (emails.length === 0) {
+    const emailList = emailKey ? emailKey.split(',') : [];
+    if (emailList.length === 0) {
       setPhotos(new Map());
       return;
     }
 
     // Filter out emails we already have in cache
-    const emailsToFetch = emails.filter(email => email && !photoCache.has(email));
-    
+    const emailsToFetch = emailList.filter(email => email && !photoCache.has(email));
+
     // Start with cached values
     const initialPhotos = new Map<string, string | null>();
-    for (const email of emails) {
+    for (const email of emailList) {
       if (email && photoCache.has(email)) {
         initialPhotos.set(email, photoCache.get(email) ?? null);
       }
     }
     setPhotos(initialPhotos);
 
-    if (emailsToFetch.length === 0) {
-      return;
-    }
+    if (emailsToFetch.length === 0) return;
 
     setIsLoading(true);
 
@@ -114,7 +117,7 @@ export function useUserPhotos(emails: string[]): {
     const fetchBatch = async () => {
       for (let i = 0; i < emailsToFetch.length; i += batchSize) {
         if (cancelled) break;
-        
+
         const batch = emailsToFetch.slice(i, i + batchSize);
         const results = await Promise.allSettled(
           batch.map(email => fetchUserPhoto(email).then(url => ({ email, url })))
@@ -137,10 +140,8 @@ export function useUserPhotos(emails: string[]): {
 
     fetchBatch();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [emails.join(',')]); // Use join to create stable dependency
+    return () => { cancelled = true; };
+  }, [emailKey]);
 
   return { photos, isLoading };
 }

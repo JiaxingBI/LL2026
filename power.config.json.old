@@ -1,0 +1,57 @@
+{
+  "appId": "27fdf297-51f5-41da-8dc7-e0201e74d883",
+  "appDisplayName": "LaborLink",
+  "description": null,
+  "environmentId": "558480fb-f006-eb81-8453-61565adacd1a",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "logoPath": "Default",
+  "localAppUrl": "http://localhost:3000/",
+  "region": "prod",
+  "connectionReferences": {
+    "0cc13ee6-3199-4796-bab5-5eb56c59f642": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_office365users",
+      "displayName": "Office 365 Users",
+      "dataSources": [
+        "office365users"
+      ],
+      "dataSets": {}
+    }
+  },
+  "databaseReferences": {
+    "default.cds": {
+      "state": "Configured",
+      "instanceUrl": "https://org196c3852.crm.dynamics.com/",
+      "webApiVersion": "v9.0",
+      "dataSources": {
+        "accounts": {
+          "entitySetName": "accounts",
+          "logicalName": "account",
+          "isHidden": false
+        },
+        "ll_demployees": {
+          "entitySetName": "jia_ll_demployees",
+          "logicalName": "jia_ll_demployee",
+          "isHidden": false
+        },
+        "ll_dshiftgroups": {
+          "entitySetName": "jia_ll_dshiftgroups",
+          "logicalName": "jia_ll_dshiftgroup",
+          "isHidden": false
+        },
+        "ll_dshiftplans": {
+          "entitySetName": "jia_ll_dshiftplans",
+          "logicalName": "jia_ll_dshiftplan",
+          "isHidden": false
+        },
+        "ll_fattendancerecords": {
+          "entitySetName": "jia_ll_fattendancereocrds",
+          "logicalName": "jia_ll_fattendancereocrd",
+          "isHidden": false
+        }
+      },
+      "version": "v9.0",
+      "environmentVariableName": ""
+    }
+  }
+}

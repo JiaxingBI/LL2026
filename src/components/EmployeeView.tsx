@@ -1,16 +1,16 @@
 import { useState, useMemo } from 'react';
-import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, ChevronDown, MessageCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Search, X, Calendar, MapPin, Users, Clock, CheckCircle, Info, MessageCircle, RefreshCw, AlertCircle } from 'lucide-react';
 import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { Employee, AssemblyLine } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { DEFAULT_ASSEMBLY_LINES } from '../constants/assemblyLines';
+import { EmptyState } from './ui/EmptyState';
+import { CardSkeleton } from './ui/Skeleton';
+import CustomSelect from './ui/CustomSelect';
+import { renderShiftSelectOption, renderShiftSelectValue } from '../utils/shiftSelectRenderers';
 
-// Default assembly lines structure (these could also come from Dataverse in the future)
-const defaultAssemblyLines: AssemblyLine[] = [
-  { id: 'L1', name: 'L1 - Assembly Line 1', capacity: 8, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L2', name: 'L2 - Assembly Line 2', capacity: 10, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L3', name: 'L3 - Assembly Line 3', capacity: 6, currentWorkers: 0, assignedWorkers: [] },
-  { id: 'L4', name: 'L4 - Assembly Line 4', capacity: 12, currentWorkers: 0, assignedWorkers: [] },
-];
+// Default assembly lines — shared with LaborScheduling
+const defaultAssemblyLines: AssemblyLine[] = DEFAULT_ASSEMBLY_LINES.slice(0, 4);
 
 interface EmployeeViewProps {
   isInitialized?: boolean;
@@ -19,12 +19,13 @@ interface EmployeeViewProps {
 export default function EmployeeView({ isInitialized = true }: EmployeeViewProps) {
   const { t, language } = useLanguage();
   const { employees, isLoading, error, refetch } = useDataverseEmployees(isInitialized);
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [lines] = useState<AssemblyLine[]>(defaultAssemblyLines);
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [highlightedEmployeeId, setHighlightedEmployeeId] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   // Generate shift options for the next 7 days
   const shiftOptions = useMemo(() => {
@@ -48,17 +49,17 @@ export default function EmployeeView({ isInitialized = true }: EmployeeViewProps
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const employee = employees.find(emp => 
-      emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    setSearchError(null);
+    const employee = employees.find(emp =>
+      emp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.id === searchQuery
     );
-    
+
     if (employee) {
       setSelectedEmployee(employee);
       setHighlightedEmployeeId(employee.id);
-      // Don't clear search query so user can see what they searched
     } else {
-      alert(t('employee.notFound'));
+      setSearchError(t('employee.notFound') || 'Employee not found. Try a different name or ID.');
     }
   };
 
@@ -74,13 +75,11 @@ export default function EmployeeView({ isInitialized = true }: EmployeeViewProps
     return 'var(--warning)';
   };
 
-  // Loading state
+  // Loading state — skeleton cards instead of blocking spinner
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', background: '#F5F5F7' }}>
-        <Loader2 size={48} style={{ animation: 'spin 1s linear infinite' }} />
-        <p style={{ color: 'var(--text-secondary)' }}>{t('common.loading') || 'Loading employees from Dataverse...'}</p>
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+        {Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)}
       </div>
     );
   }
@@ -109,38 +108,45 @@ export default function EmployeeView({ isInitialized = true }: EmployeeViewProps
           {/* Search Bar */}
           <form onSubmit={handleSearch} style={{ position: 'relative', flex: 1, minWidth: '250px' }}>
             <Search size={18} color="#9ca3af" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', zIndex: 1 }} />
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('employee.searchPlaceholder')} 
+              onChange={(e) => { setSearchQuery(e.target.value); setSearchError(null); }}
+              placeholder={t('employee.searchPlaceholder')}
               className="input"
-              style={{ 
-                width: '100%', 
-                paddingLeft: '42px', 
-                paddingRight: '100px', 
-                paddingTop: '10px', 
-                paddingBottom: '10px', 
-                fontSize: '14px', 
+              style={{
+                width: '100%',
+                paddingLeft: '42px',
+                paddingRight: '100px',
+                paddingTop: '10px',
+                paddingBottom: '10px',
+                fontSize: '14px',
                 borderRadius: '8px',
-                border: '1px solid #e5e7eb'
+                border: searchError ? '1px solid var(--danger)' : '1px solid #e5e7eb',
               }}
             />
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               className="btn btn-primary"
-              style={{ 
-                position: 'absolute', 
-                right: '4px', 
-                top: '50%', 
+              style={{
+                position: 'absolute',
+                right: '4px',
+                top: '50%',
                 transform: 'translateY(-50%)',
                 padding: '6px 16px',
-                fontSize: '13px'
+                fontSize: '13px',
               }}
             >
               {t('employee.search')}
             </button>
           </form>
+          {/* Inline search error — replaces native alert() */}
+          {searchError && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--danger)', fontSize: 13, flexShrink: 0 }}>
+              <AlertCircle size={15} />
+              {searchError}
+            </div>
+          )}
 
           {/* Refresh Button */}
           <button
@@ -165,30 +171,15 @@ export default function EmployeeView({ isInitialized = true }: EmployeeViewProps
           </button>
 
           {/* Shift Selector */}
-          <div style={{ position: 'relative' }}>
-            <select
-              value={selectedShift}
-              onChange={(e) => setSelectedShift(e.target.value)}
-              style={{ 
-                padding: '10px 36px 10px 12px', 
-                border: '1px solid var(--border-color)', 
-                borderRadius: '8px', 
-                fontSize: '14px',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                appearance: 'none',
-                background: 'white',
-                minWidth: '180px'
-              }}
-            >
-              {shiftOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} />
-          </div>
+          <CustomSelect
+            standalone
+            value={selectedShift}
+            onChange={(v) => setSelectedShift(v)}
+            options={shiftOptions}
+            minWidth="180px"
+            renderValue={renderShiftSelectValue}
+            renderOption={renderShiftSelectOption}
+          />
         </div>
       </div>
 
@@ -256,9 +247,7 @@ export default function EmployeeView({ isInitialized = true }: EmployeeViewProps
 
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {line.assignedWorkers.length === 0 ? (
-                  <div style={{ height: '40px', border: '2px dashed #f3f4f6', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
-                    <span style={{ fontSize: '10px' }}>{t('labor.noWorkers')}</span>
-                  </div>
+                  <EmptyState title={t('labor.noWorkers')} />
                 ) : (
                   line.assignedWorkers.map((worker) => (
                     <div 

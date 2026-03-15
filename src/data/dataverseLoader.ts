@@ -22,6 +22,7 @@ import type { Jia_ll_dshiftgroups } from '../generated/models/Jia_ll_dshiftgroup
 import type { Jia_ll_dshiftplans } from '../generated/models/Jia_ll_dshiftplansModel';
 import type { Jia_ll_fattendancereocrds } from '../generated/models/Jia_ll_fattendancereocrdsModel';
 import type { Employee, ShiftEntry, Role, ShiftTeam, WorkStatus } from '../types';
+import { USE_MOCK_DATA, generateMockDataverseData } from './mockData';
 
 // Dataverse raw types export
 export type { Jia_ll_demployees, Jia_ll_dshiftgroups, Jia_ll_dshiftplans, Jia_ll_fattendancereocrds };
@@ -44,6 +45,12 @@ export interface TransformedData {
  * Fetch all data from the four Dataverse tables
  */
 export async function fetchDataverseData(): Promise<DataverseData> {
+  // ── Mock data shortcut ──
+  if (USE_MOCK_DATA) {
+    console.log('[LaborLink] Using mock data (USE_MOCK_DATA = true)');
+    return generateMockDataverseData();
+  }
+
   try {
     // Fetch all tables in parallel for better performance
     const [employeesResult, shiftGroupsResult, shiftPlansResult, attendanceResult] = await Promise.all([
@@ -62,8 +69,12 @@ export async function fetchDataverseData(): Promise<DataverseData> {
         filter: `jia_date ge '2026-01-01' and jia_date le '2026-12-31'`
       }),
       Jia_ll_fattendancereocrdsService.getAll({
+        // NOTE: The current schema does NOT have jia_empid (employee ID) or jia_date fields.
+        // This prevents merging exceptions back into per-employee grid cells on reload.
+        // TODO: Add jia_empid and jia_date columns to jia_ll_fattendancereocrds in Dataverse,
+        //       then update this select and the transformDataverseData merge step below.
         select: ['jia_ll_fattendancereocrdid', 'jia_hours', 'jia_action', 'jia_daynightshift',
-                 'jia_colorshift', 'jia_area', 'jia_department', 'statecode']
+                 'jia_colorshift', 'jia_area', 'jia_department', 'statecode', 'createdon']
       })
     ]);
 
@@ -172,14 +183,24 @@ function mapEmployeeStatusToWorkStatus(status?: string): WorkStatus {
 
 /**
  * Transform Dataverse data into app-compatible Employee format
- * 
+ *
  * KEY LOGIC:
  * - Employees come from ll_dEmployee, filtered by jia_worktype containing "12H SHF 1/2/3/4"
  * - Schedule grid cells are populated from ll_dShiftPlan:
  *   When ll_dShiftPlan.jia_colorshift matches the employee's derived shiftTeam color,
  *   that employee is scheduled for that date and shows "12" (default hours).
- * - Attendance records (ll_fAttendanceRecord) are NOT used for initial load;
- *   they store exceptions only (OT/Leave) and would be merged separately.
+ *
+ * ⚠️  KNOWN LIMITATION — Attendance Record Merging:
+ * ll_fAttendanceRecord currently does NOT store jia_empid (employee ID) or jia_date (date).
+ * Without these fields it is impossible to map exceptions (OT/Leave) back to individual
+ * employee×date cells on reload.
+ *
+ * To enable persistence:
+ *   1. Add `jia_empid` (text, employee ID) to jia_ll_fattendancereocrds in Dataverse.
+ *   2. Add `jia_date` (date only) to jia_ll_fattendancereocrds in Dataverse.
+ *   3. Update createAttendanceRecord() to write these fields.
+ *   4. Add a merge step below that applies attendance records as overrides on top of
+ *      the base schedule cells.
  */
 export function transformDataverseData(data: DataverseData): TransformedData {
   const year = new Date().getFullYear();
@@ -317,6 +338,11 @@ export async function createAttendanceRecord(record: {
   area: string;
   department: string;
 }) {
+  if (USE_MOCK_DATA) {
+    console.log('[LaborLink] Mock save:', record);
+    return { id: crypto.randomUUID?.() ?? Date.now().toString() };
+  }
+
   try {
     const result = await Jia_ll_fattendancereocrdsService.create({
       jia_hours: record.hours,

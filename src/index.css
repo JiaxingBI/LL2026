@@ -11,7 +11,11 @@
   --danger: #ff3b30;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --radius-sm: 6px;
   --radius: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -28,10 +32,39 @@ html, body, #root {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   background-color: var(--bg-color);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Accessibility: keyboard focus indicator */
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Skeleton loading animation */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.skeleton {
+  background: #e5e7eb;
+  border-radius: var(--radius-sm);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Toast notification */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.toast {
+  animation: toast-in 0.22s ease-out;
 }
 
 /* Layout Utilities */
@@ -188,10 +221,319 @@ td {
   border-radius: 8px;
   font-size: 14px;
   outline: none;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: white;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .input:focus {
   border-color: var(--accent-blue);
   box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+}
+
+/* ── Modern Select & Date Inputs ─────────────────────────────────────── */
+
+/* Standalone selects (with border) — used in toolbars, modals, forms */
+select.input,
+select[class="input"] {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2386868b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+  cursor: pointer;
+}
+
+/* All native selects: consistent font and color */
+select {
+  font-family: var(--font-sans);
+  font-size: inherit;
+  color: var(--text-primary);
+}
+
+/* Inline table selects — keep ghost look but add subtle hover indicator */
+td select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23b0b0b5' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 2px center;
+  background-color: transparent;
+  padding-right: 16px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  font-family: var(--font-sans);
+}
+td select:hover {
+  border-color: var(--border-color);
+  background-color: rgba(0, 113, 227, 0.04);
+}
+td select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
+  background-color: white;
+}
+
+/* Date input styling */
+input[type="date"],
+input[type='date'] {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text-primary);
+  position: relative;
+}
+/* Standalone date inputs (with .input class) */
+input[type="date"].input,
+input[type='date'].input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+/* Inline table date inputs — ghost style */
+td input[type="date"],
+td input[type='date'] {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: transparent;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  font-family: var(--font-sans);
+}
+td input[type="date"]:hover,
+td input[type='date']:hover {
+  border-color: var(--border-color);
+  background-color: rgba(0, 113, 227, 0.04);
+}
+td input[type="date"]:focus,
+td input[type='date']:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
+  background-color: white;
+}
+/* Webkit calendar picker icon — more subtle */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+input[type="date"]:hover::-webkit-calendar-picker-indicator,
+input[type='date']:hover::-webkit-calendar-picker-indicator {
+  opacity: 0.8;
+}
+
+.cdp-trigger {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.cdp-trigger:hover {
+  border-color: var(--border-color);
+  background: white;
+}
+
+.cdp-trigger:focus-visible,
+.cdp-open {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.14);
+}
+
+.cdp-standalone {
+  border-color: var(--border-color);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.cdp-compact {
+  background: transparent;
+  box-shadow: none;
+}
+
+.cdp-popover {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.08);
+  padding: 12px;
+  animation: cs-in 0.14s ease-out;
+  backdrop-filter: blur(12px);
+}
+
+.cdp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cdp-month-label {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.cdp-nav {
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cdp-nav:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: rgba(0, 113, 227, 0.18);
+  color: var(--accent-blue);
+}
+
+.cdp-nav:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.cdp-weekdays,
+.cdp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.cdp-weekdays {
+  margin-bottom: 6px;
+}
+
+.cdp-weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  text-transform: uppercase;
+}
+
+.cdp-day {
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.cdp-day:hover:not(:disabled) {
+  background: #f5faff;
+  border-color: rgba(0, 113, 227, 0.14);
+  color: var(--accent-blue);
+}
+
+.cdp-day:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+.cdp-outside {
+  color: #9ca3af;
+}
+
+.cdp-today {
+  border-color: rgba(0, 113, 227, 0.22);
+  color: var(--accent-blue);
+}
+
+.cdp-active {
+  background: linear-gradient(135deg, #0071e3 0%, #0ea5e9 100%);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 8px 18px rgba(0, 113, 227, 0.24);
+}
+
+.cdp-active:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0066cc 0%, #0284c7 100%);
+  color: white;
+}
+
+.cdp-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.cdp-today-button {
+  border: none;
+  background: transparent;
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.cdp-today-button:hover:not(:disabled) {
+  background: rgba(0, 113, 227, 0.08);
+}
+
+.cdp-today-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Checkbox modernization */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-color);
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  flex-shrink: 0;
+}
+input[type="checkbox"]:hover {
+  border-color: var(--accent-blue);
+}
+input[type="checkbox"]:checked {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 1.5px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.25);
 }
 
 /* Hide number input spinners/step buttons globally */
@@ -205,9 +547,172 @@ input[type="number"] {
   appearance: textfield;
 }
 
+/* Styled select — use on standalone selects in toolbars/forms */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: white;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2386868b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.select:hover {
+  border-color: #b0b0b5;
+}
+.select:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+}
+
 /* Pivot table number inputs - zero padding */
 .table-container table input[type="number"] {
   padding: 0;
+}
+
+/* ── CustomSelect Component ──────────────────────────────────────────── */
+
+/* Trigger: default (inline/table) */
+.cs-trigger {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  transition: all 0.15s ease;
+  outline: none;
+}
+.cs-trigger-label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.cs-trigger:hover {
+  border-color: var(--border-color);
+  background: rgba(0, 113, 227, 0.04);
+}
+.cs-trigger.cs-open,
+.cs-trigger:focus-visible {
+  border-color: var(--accent-blue);
+  background: white;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
+}
+.cs-trigger .lucide {
+  color: #b0b0b5;
+}
+.cs-trigger:hover .lucide,
+.cs-trigger.cs-open .lucide {
+  color: var(--accent-blue);
+}
+
+/* Trigger: standalone (toolbar/form) */
+.cs-trigger.cs-standalone {
+  background: white;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  min-height: 56px;
+}
+.cs-trigger.cs-standalone:hover {
+  border-color: #b0b0b5;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+.cs-trigger.cs-standalone.cs-open,
+.cs-trigger.cs-standalone:focus-visible {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+}
+
+/* Dropdown panel */
+.cs-dropdown {
+  background: white;
+  border: 1px solid #e0e0e4;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.08);
+  animation: cs-in 0.12s ease-out;
+  overflow: hidden;
+}
+@keyframes cs-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Option rows */
+.cs-option {
+  color: var(--text-primary);
+  transition: background 0.1s ease, color 0.1s ease;
+  font-family: var(--font-sans);
+}
+.cs-option:hover {
+  background: #f6faff;
+}
+.cs-option.cs-active {
+  background: linear-gradient(180deg, #eff6ff 0%, #e8f1ff 100%);
+  color: var(--accent-blue);
+}
+.cs-option-check {
+  color: var(--accent-blue);
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.cs-shift-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.cs-shift-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cs-shift-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cs-shift-option-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.cs-shift-date {
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cs-shift-subtitle {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.cs-shift-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.cs-shift-pill-day {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+.cs-shift-pill-night {
+  background: #e0e7ff;
+  color: #4338ca;
 }
 
 /* Grid System */

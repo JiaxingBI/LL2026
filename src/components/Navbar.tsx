@@ -6,6 +6,8 @@ interface NavbarProps {
   onTabChange: (tab: string) => void;
 }
 
+const IS_DEV = import.meta.env.DEV;
+
 export default function Navbar({ activeTab, onTabChange }: NavbarProps) {
   const { language, setLanguage, t } = useLanguage();
 
@@ -13,7 +15,8 @@ export default function Navbar({ activeTab, onTabChange }: NavbarProps) {
     { id: 'attendance', label: t('nav.attendance'), icon: Calendar },
     { id: 'assembly', label: t('nav.assembly'), icon: LayoutDashboard },
     { id: 'employee', label: t('nav.employee'), icon: User },
-    { id: 'test', label: t('nav.test') || 'Test', icon: FlaskConical },
+    // TestPage only visible during local dev — hidden in production builds
+    ...(IS_DEV ? [{ id: 'test', label: t('nav.test') || 'Test', icon: FlaskConical }] : []),
   ];
 
   const toggleLanguage = () => {
