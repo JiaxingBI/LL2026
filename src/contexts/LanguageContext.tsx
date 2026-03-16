@@ -133,6 +133,14 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.dayShift': 'Day Shift',
     'labor.nightShift': 'Night Shift',
     'labor.selectDateShift': 'Select Date & Shift',
+    'labor.availableWorkers': 'Available workers',
+    'labor.assignedWorkers': 'Assigned workers',
+    'labor.openSlots': 'Open slots',
+    'labor.assignSelected': 'Assign selected',
+    'labor.availableWorkersHint': 'Availability is synced from Attendance Plan for the selected date and shift.',
+    'labor.allAssigned': 'All available workers are already assigned',
+    'labor.commentEmpty': 'No comment yet. Click to add context for this line.',
+    'labor.commentPlaceholder': 'Add a handoff note, staffing risk, or assembly instruction...',
     
     // Employee View
     'employee.title': 'Employee Kiosk',
@@ -278,6 +286,14 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.dayShift': '白班',
     'labor.nightShift': '夜班',
     'labor.selectDateShift': '选择日期和班次',
+    'labor.availableWorkers': '可用员工',
+    'labor.assignedWorkers': '已分配员工',
+    'labor.openSlots': '空缺工位',
+    'labor.assignSelected': '分配所选员工',
+    'labor.availableWorkersHint': '员工可用性与出勤计划页面所选日期和班次保持一致。',
+    'labor.allAssigned': '当前可用员工已全部分配',
+    'labor.commentEmpty': '暂无备注，点击可为该产线补充说明。',
+    'labor.commentPlaceholder': '添加交接备注、人员风险或装配说明...',
     
     // Employee View
     'employee.title': '员工自助终端',

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 interface GallerySummaryBarProps {
   employeesCount: number;
   scheduledCount: number;
@@ -11,14 +13,24 @@ interface GallerySummaryBarProps {
   lastSliceThirdPartyPlan: number;
   lastSliceOvertimeCount: number;
   lastSliceLeaveCount: number;
+  extraCards?: ReactNode;
   t: (key: string) => string;
 }
 
-function SummaryChip({ label, value }: { label: string; value: string | number }) {
+function SummaryCard({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string | number;
+  caption?: string;
+}) {
   return (
-    <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{label}</span>
-      <span style={{ fontSize: '16px', fontWeight: 800, whiteSpace: 'nowrap' }}>{value}</span>
+    <div className='card' style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
+      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: '26px', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-0.02em' }}>{value}</span>
+      {caption ? <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{caption}</span> : null}
     </div>
   );
 }
@@ -36,40 +48,61 @@ export function GallerySummaryBar({
   lastSliceThirdPartyPlan,
   lastSliceOvertimeCount,
   lastSliceLeaveCount,
+  extraCards,
   t,
 }: GallerySummaryBarProps) {
   return (
-    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-      <SummaryChip label={t('attendance.totalWorkers')} value={employeesCount} />
-      <SummaryChip label={t('attendance.scheduledSlice')} value={scheduledCount} />
-      <SummaryChip label={t('attendance.overtimeSlice')} value={overtimeCount} />
-      <SummaryChip label={t('attendance.leaveSlice')} value={leaveCount} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 12,
+        }}
+      >
+        <SummaryCard label={t('attendance.totalWorkers')} value={employeesCount} caption='Loaded in current plan' />
+        <SummaryCard label={t('attendance.scheduledSlice')} value={scheduledCount} caption='Visible in current date and shift' />
+        <SummaryCard label={t('attendance.overtimeSlice')} value={overtimeCount} caption='Exceptions increasing planned hours' />
+        <SummaryCard label={t('attendance.leaveSlice')} value={leaveCount} caption='Exceptions reducing planned hours' />
+        {extraCards}
+      </div>
 
-      <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
+      <div className='card' style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: 4 }}>
+              {t('attendance.lastColorShift')}
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>{lastSliceLabel}</div>
+          </div>
+          <span
+            style={{
+              fontSize: '12px',
+              padding: '6px 12px',
+              borderRadius: '999px',
+              border: '1px solid #dbeafe',
+              background: '#eff6ff',
+              color: 'var(--accent-blue)',
+              fontWeight: 700,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {lastSliceTeamLabel}
+          </span>
+        </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)' }}>
-          {t('attendance.lastColorShift')}
-        </span>
-        <span
+        <div
           style={{
-            fontSize: '11px',
-            padding: '2px 10px',
-            borderRadius: '999px',
-            border: '1px solid #dbeafe',
-            background: '#eff6ff',
-            color: 'var(--accent-blue)',
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 12,
           }}
         >
-          {lastSliceLabel} • {lastSliceTeamLabel}
-        </span>
-
-        <SummaryChip label={t('attendance.actualArrivedPlanInternal')} value={`${lastSliceInternalArrived}/${lastSliceInternalPlan}`} />
-        <SummaryChip label={t('attendance.actualArrivedPlanThirdParty')} value={`${lastSliceThirdPartyArrived}/${lastSliceThirdPartyPlan}`} />
-        <SummaryChip label={t('attendance.overtimeWorkers')} value={lastSliceOvertimeCount} />
-        <SummaryChip label={t('attendance.leaveWorkers')} value={lastSliceLeaveCount} />
+          <SummaryCard label={t('attendance.actualArrivedPlanInternal')} value={`${lastSliceInternalArrived}/${lastSliceInternalPlan}`} />
+          <SummaryCard label={t('attendance.actualArrivedPlanThirdParty')} value={`${lastSliceThirdPartyArrived}/${lastSliceThirdPartyPlan}`} />
+          <SummaryCard label={t('attendance.overtimeWorkers')} value={lastSliceOvertimeCount} />
+          <SummaryCard label={t('attendance.leaveWorkers')} value={lastSliceLeaveCount} />
+        </div>
       </div>
     </div>
   );

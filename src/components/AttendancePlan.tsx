@@ -1,6 +1,5 @@
-import { useState, useMemo, useCallback, useEffect, useDeferredValue, useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { Search, Sun, Moon } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useDeferredValue } from 'react';
+import { Sun, Moon } from 'lucide-react';
 import { fetchDataverseData, transformDataverseData, createAttendanceRecord, type TransformedData } from '../data/dataverseLoader';
 import { USE_MOCK_DATA } from '../data/mockData';
 import type { Employee, Adjustment } from '../types';
@@ -16,7 +15,14 @@ import { AttendancePlanToolbar } from './attendance/AttendancePlanToolbar';
 import { GallerySummaryBar } from './attendance/GallerySummaryBar';
 import { VirtualPivotTable } from './attendance/VirtualPivotTable';
 import { GalleryEmployeeRow } from './attendance/GalleryEmployeeRow';
+import AddWorkerModal from './ui/AddWorkerModal';
 import { GENDER_OPTIONS, getShiftClass, ID_STATUS_OPTIONS, ROLE_OPTIONS, SHIFT_TEAM_VALUES, WORK_STATUS_OPTIONS } from '../constants/attendanceOptions';
+import {
+  buildPendingLeaveKey,
+  mergeEmployeesWithLocal,
+  readPersistedAttendancePlanState,
+  writePersistedAttendancePlanState,
+} from '../utils/attendancePlanPersistence';
 
 /*******************************************************************************
  * DATA MODEL – Three-Table Architecture
@@ -122,19 +128,6 @@ function toDateKeyFromIso(isoDate: string): string {
   return `${month}/${day}`;
 }
 
-const ATTENDANCE_PLAN_STORAGE_KEY = 'laborlink-attendance-plan-state-v1';
-
-interface PersistedAttendancePlanState {
-  version: 1;
-  planYear: number;
-  employees: Employee[];
-  adjustments: Adjustment[];
-  savedEmployees: Employee[];
-  savedAdjustments: Adjustment[];
-  pendingLeaveIds: string[];
-  hasChanges: boolean;
-}
-
 function createLocalAdjustmentId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `local-${crypto.randomUUID()}`;
@@ -142,60 +135,9 @@ function createLocalAdjustmentId(): string {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function buildPendingLeaveKey(empId: string, dateIso: string, shiftType: ShiftType): string {
-  return `${empId}|${dateIso}|${shiftType}`;
-}
-
 function isSameAdjustment(adjustment: Adjustment, employeeId: string, dateIso: string, isNight: boolean): boolean {
   return adjustment.employeeId === employeeId && adjustment.date === dateIso && Boolean(adjustment.isNight) === isNight;
 }
-
-function mergeEmployeesWithLocal(baseEmployees: Employee[], localEmployees: Employee[]): Employee[] {
-  const localById = new Map(localEmployees.map(employee => [employee.id, employee]));
-  return baseEmployees.map(employee => {
-    const local = localById.get(employee.id);
-    if (!local) return employee;
-    return {
-      ...employee,
-      role: local.role,
-      indirectDirect: local.indirectDirect,
-      status: local.status,
-      shiftTeam: local.shiftTeam,
-      gender: local.gender,
-      shifts: local.shifts,
-    };
-  });
-}
-
-function readPersistedAttendancePlanState(planYear: number): PersistedAttendancePlanState | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const raw = window.localStorage.getItem(ATTENDANCE_PLAN_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedAttendancePlanState;
-    if (parsed.version !== 1 || parsed.planYear !== planYear) {
-      return null;
-    }
-    return parsed;
-  } catch (error) {
-    console.warn('Failed to read persisted attendance state:', error);
-    return null;
-  }
-}
-
-function writePersistedAttendancePlanState(state: PersistedAttendancePlanState): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(ATTENDANCE_PLAN_STORAGE_KEY, JSON.stringify(state));
-  } catch (error) {
-    console.warn('Failed to persist attendance state:', error);
-  }
-}
-
-const ADD_WORKER_ROW_HEIGHT = 48;
-
 
 interface AttendancePlanProps {
   isInitialized?: boolean;
@@ -238,10 +180,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [galleryHourDrafts, setGalleryHourDrafts] = useState<Record<string, { value: string; touched: boolean }>>({});
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [addEmployeeIds, setAddEmployeeIds] = useState<Set<string>>(new Set());
-  const [addSearchQuery, setAddSearchQuery] = useState<string>('');
-  const [addTeamFilter, setAddTeamFilter] = useState<'All' | 'Green' | 'Blue' | 'Orange' | 'Yellow'>('All');
-  const deferredAddSearchQuery = useDeferredValue(addSearchQuery);
-  const addWorkerListRef = useRef<HTMLDivElement>(null);
   // Selection state for delete functionality in the table
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   
@@ -480,8 +418,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setSelectedRowIds(new Set());
     setShowAddPicker(false);
     setAddEmployeeIds(new Set());
-    setAddSearchQuery('');
-    setAddTeamFilter('All');
     setHasChanges(false);
   }, [savedEmployees, savedAdjustments]);
 
@@ -800,24 +736,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return employees.filter(emp => !scheduledIdSet.has(emp.id));
   }, [employees, scheduledIdSet]);
 
-  const filteredAvailableEmployeesForGallery = useMemo(() => {
-    const query = deferredAddSearchQuery.toLowerCase().trim();
-    return availableEmployeesForGallery.filter(emp => {
-      if (addTeamFilter !== 'All' && emp.shiftTeam !== addTeamFilter) return false;
-      if (!query) return true;
-      return emp.id.toLowerCase().includes(query) || emp.name.toLowerCase().includes(query);
-    });
-  }, [availableEmployeesForGallery, deferredAddSearchQuery, addTeamFilter]);
-
-  const addWorkerVirtualizer = useVirtualizer({
-    count: filteredAvailableEmployeesForGallery.length,
-    getScrollElement: () => addWorkerListRef.current,
-    estimateSize: () => ADD_WORKER_ROW_HEIGHT,
-    overscan: 10,
-  });
-
-  const addWorkerVirtualRows = addWorkerVirtualizer.getVirtualItems();
-
   /*---------------------------------------------------------------------------
    * ADJUSTMENT RECORDS → ll_fAttendanceRecord (exceptions only)
    * -------------------------------------------------------------------------
@@ -879,8 +797,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
 
     setAddEmployeeIds(new Set());
-    setAddSearchQuery('');
-    setAddTeamFilter('All');
     setShowAddPicker(false);
   }, [addEmployeeIds, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
 
@@ -941,8 +857,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const closeAddWorkerModal = useCallback(() => {
     setShowAddPicker(false);
     setAddEmployeeIds(new Set());
-    setAddSearchQuery('');
-    setAddTeamFilter('All');
   }, []);
 
   const sliceAdjustments = useMemo(() => {
@@ -1331,7 +1245,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
             </div>
 
             {/* Main: cards + table */}
-            <div style={{ padding: '8px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ padding: '12px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <GallerySummaryBar
                 employeesCount={employees.length}
                 scheduledCount={galleryEmployees.length}
@@ -1428,212 +1342,24 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                   </div>
                 </div>
 
-                {/* Add Worker Modal */}
-                {showAddPicker && (
-                  <div
-                    role='dialog'
-                    aria-modal='true'
-                    onMouseDown={(e) => {
-                      if (e.currentTarget === e.target) closeAddWorkerModal();
-                    }}
-                    style={{
-                      position: 'fixed',
-                      inset: 0,
-                      background: 'rgba(0,0,0,0.35)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      zIndex: 9999,
-                      padding: 12
-                    }}
-                  >
-                    <div
-                      onMouseDown={(e) => e.stopPropagation()}
-                      style={{
-                        width: 'min(920px, 96vw)',
-                        maxHeight: 'min(640px, 92vh)',
-                        background: 'white',
-                        borderRadius: 12,
-                        border: '1px solid rgba(0,0,0,0.12)',
-                        overflow: 'hidden',
-                        display: 'flex',
-                        flexDirection: 'column'
-                      }}
-                    >
-                      <div
-                        style={{
-                          padding: '10px 12px',
-                          borderBottom: '1px solid var(--border-color)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 10
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-                          <div style={{ fontWeight: 800, fontSize: 14 }}>{t('attendance.addWorker')}</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                            {t('attendance.selected') ?? 'Selected'}: {addEmployeeIds.size}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <button
-                            onClick={closeAddWorkerModal}
-                            className='btn btn-secondary'
-                            type='button'
-                            style={{ padding: '6px 12px', fontSize: '12px' }}
-                          >
-                            {t('attendance.close') ?? 'Close'}
-                          </button>
-                          <button
-                            onClick={handleAddWorkersToGallery}
-                            disabled={addEmployeeIds.size === 0}
-                            className='btn'
-                            type='button'
-                            style={{
-                              padding: '6px 14px',
-                              fontSize: '12px',
-                              fontWeight: 600,
-                              backgroundColor: addEmployeeIds.size > 0 ? '#4caf50' : '#f5f5f5',
-                              color: addEmployeeIds.size > 0 ? '#fff' : '#999',
-                              border: `1px solid ${addEmployeeIds.size > 0 ? '#4caf50' : '#e0e0e0'}`,
-                              cursor: addEmployeeIds.size > 0 ? 'pointer' : 'not-allowed',
-                              opacity: addEmployeeIds.size > 0 ? 1 : 0.6
-                            }}
-                          >
-                            {t('attendance.addSelected') ?? 'Add'} {addEmployeeIds.size > 0 ? `(${addEmployeeIds.size})` : ''}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                          {/* Team slicer - only affects the add-worker list */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            {(['All', 'Green', 'Blue', 'Orange', 'Yellow'] as const).map(team => {
-                              const active = addTeamFilter === team;
-                              return (
-                                <button
-                                  key={team}
-                                  type='button'
-                                  className='btn'
-                                  onClick={() => setAddTeamFilter(team)}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '12px',
-                                    borderRadius: '16px',
-                                    border: active ? '1px solid var(--accent-blue)' : '1px solid #e0e0e0',
-                                    background: active ? '#eff6ff' : 'white',
-                                    color: active ? 'var(--accent-blue)' : 'var(--text-primary)',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  {team === 'All' ? t('filter.all') : t(`filter.${team.toLowerCase()}`)}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          <div style={{ position: 'relative', flex: 1, minWidth: 240, maxWidth: 360 }}>
-                            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-                            <input
-                              type='text'
-                              value={addSearchQuery}
-                              onChange={(e) => setAddSearchQuery(e.target.value)}
-                              placeholder={t('attendance.searchByIdOrName')}
-                              className='input'
-                              style={{ paddingLeft: '32px', width: '100%', height: '32px', fontSize: '13px' }}
-                            />
-                          </div>
-                        </div>
-
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                          {filteredAvailableEmployeesForGallery.length} available
-                        </div>
-
-                        <div
-                          ref={addWorkerListRef}
-                          style={{
-                            flex: 1,
-                            minHeight: 0,
-                            overflowY: 'auto',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: 10,
-                            background: 'linear-gradient(to bottom, #f8fafc, #fff)',
-                            padding: 10,
-                          }}
-                        >
-                          {filteredAvailableEmployeesForGallery.length > 0 && (
-                            <div style={{ height: addWorkerVirtualizer.getTotalSize(), position: 'relative' }}>
-                              {addWorkerVirtualRows.map(virtualRow => {
-                                const emp = filteredAvailableEmployeesForGallery[virtualRow.index];
-                                if (!emp) return null;
-                                const isSelected = addEmployeeIds.has(emp.id);
-                                const shiftBorderColor = emp.shiftTeam === 'Green' ? '#22c55e'
-                                  : emp.shiftTeam === 'Blue' ? '#3b82f6'
-                                  : emp.shiftTeam === 'Orange' ? '#f97316'
-                                  : emp.shiftTeam === 'Yellow' ? '#eab308'
-                                  : '#e0e0e0';
-
-                                return (
-                                  <div
-                                    key={emp.id}
-                                    style={{
-                                      position: 'absolute',
-                                      top: 0,
-                                      left: 0,
-                                      width: '100%',
-                                      transform: `translateY(${virtualRow.start}px)`,
-                                      paddingBottom: 8,
-                                    }}
-                                  >
-                                    <button
-                                      onClick={() => toggleAddEmployeeSelection(emp.id)}
-                                      className='btn'
-                                      type='button'
-                                      aria-pressed={isSelected}
-                                      style={{
-                                        width: '100%',
-                                        minHeight: '40px',
-                                        padding: '8px 12px',
-                                        fontSize: '12px',
-                                        borderRadius: '10px',
-                                        border: isSelected ? '2px solid var(--accent-blue)' : `2px solid ${shiftBorderColor}`,
-                                        background: isSelected ? '#eff6ff' : 'white',
-                                        color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        gap: '12px',
-                                        transition: 'all 0.15s ease',
-                                        textAlign: 'left'
-                                      }}
-                                    >
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
-                                        <span style={{ width: '18px', textAlign: 'center', fontSize: '14px', opacity: isSelected ? 1 : 0.3 }}>✓</span>
-                                        <span style={{ fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', minWidth: '58px' }}>{emp.id}</span>
-                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{emp.name}</span>
-                                      </div>
-                                      <span className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ flexShrink: 0 }}>
-                                        {t(`filter.${emp.shiftTeam.toLowerCase()}`)}
-                                      </span>
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {filteredAvailableEmployeesForGallery.length === 0 && (
-                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '8px' }}>
-                              {t('attendance.noMatchingWorkers')}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <AddWorkerModal
+                  isOpen={showAddPicker}
+                  title={t('attendance.addWorker')}
+                  subtitle={`${selectedDateKey} • ${selectedShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}`}
+                  employees={availableEmployeesForGallery}
+                  selectedIds={addEmployeeIds}
+                  selectedLabel={t('attendance.selected')}
+                  searchPlaceholder={t('attendance.searchByIdOrName')}
+                  emptyTitle={t('attendance.noMatchingWorkers')}
+                  emptyDescription={t('attendance.noEmployeesInSlice')}
+                  availableLabel={(count) => `${count} available`}
+                  confirmLabel={(count) => `${t('attendance.addSelected')} (${count})`}
+                  closeLabel={t('attendance.close')}
+                  teamLabel={(team) => team === 'All' ? t('filter.all') : t(`filter.${team.toLowerCase()}`)}
+                  onToggleSelect={toggleAddEmployeeSelection}
+                  onClose={closeAddWorkerModal}
+                  onConfirm={handleAddWorkersToGallery}
+                />
 
                 {/* Table with selection checkboxes */}
                 <div className='table-container' style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
