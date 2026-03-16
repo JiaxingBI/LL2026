@@ -35,9 +35,19 @@ export function validateShiftChange(
   isNight: boolean,
   newHours: number,
   _allEmployees: Employee[],
-  dateKeys: string[]
+  dateKeys: string[],
+  planYear: number = getUtc8Now().getFullYear(),
 ): ValidationResult {
   const violations: string[] = [];
+
+  if (!Number.isFinite(newHours) || newHours < 0) {
+    return {
+      isValid: false,
+      violations: [
+        '规则违反：工时必须是 0 到 14 之间的有效数字。\n(Rule violation: Working hours must be a valid number between 0 and 14.)',
+      ],
+    };
+  }
 
   // Only validate if actually adding/increasing hours
   if (newHours <= 0) {
@@ -51,19 +61,19 @@ export function validateShiftChange(
   }
 
   // Rule 2: Check 60 hours in any consecutive 7 days
-  const weeklyHoursViolation = checkWeeklyHours(employee, targetDate, isNight, newHours, dateKeys);
+  const weeklyHoursViolation = checkWeeklyHours(employee, targetDate, isNight, newHours, dateKeys, planYear);
   if (weeklyHoursViolation) {
     violations.push(weeklyHoursViolation);
   }
 
   // Rule 3: Check no more than 6 consecutive working days
-  const consecutiveDaysViolation = checkConsecutiveWorkDays(employee, targetDate, isNight, newHours, dateKeys);
+  const consecutiveDaysViolation = checkConsecutiveWorkDays(employee, targetDate, isNight, newHours, dateKeys, planYear);
   if (consecutiveDaysViolation) {
     violations.push(consecutiveDaysViolation);
   }
 
   // Rule 4: Check rest time between shifts (>10 hours)
-  const restTimeViolation = checkRestTimeBetweenShifts(employee, targetDate, isNight, newHours, dateKeys);
+  const restTimeViolation = checkRestTimeBetweenShifts(employee, targetDate, isNight, newHours, dateKeys, planYear);
   if (restTimeViolation) {
     violations.push(restTimeViolation);
   }
@@ -124,11 +134,11 @@ function checkWeeklyHours(
   targetDate: string,
   isNight: boolean,
   newHours: number,
-  _dateKeys: string[]
+  _dateKeys: string[],
+  planYear: number,
 ): string | null {
-  const year = getUtc8Now().getFullYear();
   const [targetMonth, targetDay] = targetDate.split('/').map(Number);
-  const targetDateObj = new Date(year, targetMonth - 1, targetDay);
+  const targetDateObj = new Date(planYear, targetMonth - 1, targetDay);
 
   // Check 7-day windows: 3 days before + target day + 3 days after
   for (let windowStart = -6; windowStart <= 0; windowStart++) {
@@ -180,11 +190,11 @@ function checkConsecutiveWorkDays(
   targetDate: string,
   _isNight: boolean,
   _newHours: number,
-  _dateKeys: string[]
+  _dateKeys: string[],
+  planYear: number,
 ): string | null {
-  const year = getUtc8Now().getFullYear();
   const [targetMonth, targetDay] = targetDate.split('/').map(Number);
-  const targetDateObj = new Date(year, targetMonth - 1, targetDay);
+  const targetDateObj = new Date(planYear, targetMonth - 1, targetDay);
 
   // Count consecutive working days including the target date
   let consecutiveBefore = 0;
@@ -235,16 +245,16 @@ function checkRestTimeBetweenShifts(
   targetDate: string,
   isNight: boolean,
   newHours: number,
-  _dateKeys: string[]
+  _dateKeys: string[],
+  planYear: number,
 ): string | null {
   // Check if shift exceeds 14 hours
   if (newHours > 14) {
     return `规则违反：每次上班时间不得超过14小时。当前输入 ${newHours} 小时。\n(Rule violation: Each work session should not exceed 14 hours. Current input is ${newHours} hours.)`;
   }
 
-  const year = getUtc8Now().getFullYear();
   const [targetMonth, targetDay] = targetDate.split('/').map(Number);
-  const targetDateObj = new Date(year, targetMonth - 1, targetDay);
+  const targetDateObj = new Date(planYear, targetMonth - 1, targetDay);
 
   // Check rest time with previous shift
   if (isNight) {

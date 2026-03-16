@@ -203,8 +203,6 @@ function mapEmployeeStatusToWorkStatus(status?: string): WorkStatus {
  *      the base schedule cells.
  */
 export function transformDataverseData(data: DataverseData): TransformedData {
-  const year = new Date().getFullYear();
-  
   // Build date keys from shift plans - find min and max dates to create continuous range
   const dateObjects: Date[] = [];
   
@@ -222,6 +220,10 @@ export function transformDataverseData(data: DataverseData): TransformedData {
       }
     }
   }
+
+  const year = dateObjects.length > 0
+    ? Math.min(...dateObjects.map(date => date.getFullYear()))
+    : new Date().getFullYear();
   
   let dateKeys: string[] = [];
   

@@ -1,37 +1,76 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Plus, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
-import type { Adjustment } from '../types';
+import type { Adjustment, Employee, Role, ShiftTeam, WorkStatus } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import CustomDatePicker from './ui/CustomDatePicker';
 import CustomSelect from './ui/CustomSelect';
+import { ROLE_OPTIONS, SHIFT_TEAM_VALUES, WORK_STATUS_OPTIONS } from '../constants/attendanceOptions';
 
 interface AdjustmentTableProps {
   adjustments: Adjustment[];
   setAdjustments: (adjustments: Adjustment[]) => void;
   selectedShift: string;
+  employees: Employee[];
 }
 
-export default function AdjustmentTable({ adjustments, setAdjustments, selectedShift }: AdjustmentTableProps) {
+function createLocalAdjustmentId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `local-${crypto.randomUUID()}`;
+  }
+  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export default function AdjustmentTable({ adjustments, setAdjustments, selectedShift, employees }: AdjustmentTableProps) {
   const { t } = useLanguage();
   const [isExpanded, setIsExpanded] = useState(false);
+  const employeeOptions = useMemo(
+    () => employees.map(employee => ({ value: employee.id, label: `${employee.id} · ${employee.name}` })),
+    [employees],
+  );
 
   // Filter adjustments by selected shift
   const filteredAdjustments = selectedShift === 'All' 
     ? adjustments 
     : adjustments.filter(adj => adj.shiftTeam === selectedShift);
 
-  const updateAdjustment = (id: string, field: keyof Adjustment, value: string | number | boolean) => {
+  const updateAdjustment = useCallback((id: string, field: keyof Adjustment, value: string | number | boolean) => {
     setAdjustments(
       adjustments.map((adj) => (adj.id === id ? { ...adj, [field]: value } : adj))
     );
-  };
+  }, [adjustments, setAdjustments]);
 
-  const addAdjustment = () => {
+  const handleEmployeeChange = useCallback((id: string, employeeId: string) => {
+    const employee = employees.find(item => item.id === employeeId);
+    setAdjustments(
+      adjustments.map(adj => {
+        if (adj.id !== id) return adj;
+        if (!employee) {
+          return {
+            ...adj,
+            employeeId: '',
+            name: '',
+          };
+        }
+        return {
+          ...adj,
+          employeeId: employee.id,
+          name: employee.name,
+          role: employee.role,
+          indirectDirect: employee.indirectDirect,
+          workStatus: employee.status,
+          shiftTeam: employee.shiftTeam,
+          gender: employee.gender,
+        };
+      }),
+    );
+  }, [adjustments, employees, setAdjustments]);
+
+  const addAdjustment = useCallback(() => {
     const newAdjustment: Adjustment = {
-      id: Date.now().toString(),
+      id: createLocalAdjustmentId(),
       employeeId: '',
       name: '',
-      role: '',
+      role: 'Ops.L1',
       indirectDirect: 'Direct',
       workStatus: 'Prod.',
       shiftTeam: 'Green',
@@ -40,14 +79,22 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
       isNight: false,
       hours: 12,
       reason: 'Overtime',
-      comments: ''
+      comments: '',
+      source: 'local',
+      synced: false,
     };
     setAdjustments([...adjustments, newAdjustment]);
-  };
+  }, [adjustments, setAdjustments]);
 
-  const removeAdjustment = (id: string) => {
+  const removeAdjustment = useCallback((id: string) => {
     setAdjustments(adjustments.filter((adj) => adj.id !== id));
-  };
+  }, [adjustments, setAdjustments]);
+
+  const updateHours = useCallback((id: string, rawValue: string) => {
+    const parsed = Number.parseInt(rawValue, 10);
+    const nextHours = Number.isFinite(parsed) ? Math.max(0, Math.min(14, parsed)) : 0;
+    updateAdjustment(id, 'hours', nextHours);
+  }, [updateAdjustment]);
 
   return (
     <div className="card" style={{ flex: isExpanded ? 1 : 'none', display: 'flex', flexDirection: 'column', minHeight: isExpanded ? '200px' : 'auto' }}>
@@ -64,6 +111,12 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
       
       {isExpanded && (
         <div className="table-container" style={{ overflowX: 'auto', flex: 1, overflowY: 'auto' }}>
+          <div style={{ padding: '10px 12px', background: '#fafafa', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={addAdjustment} className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 12px' }}>
+              <Plus size={16} />
+              {t('adjustment.add')}
+            </button>
+          </div>
           <table style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead>
               <tr>
@@ -87,27 +140,25 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                 return (
                   <tr key={adj.id}>
                     <td style={{ color: '#666', position: 'sticky', left: 0, background: 'white', zIndex: 1, width: '40px', minWidth: '40px' }}>
-                      <input 
-                        type="text" 
+                      <CustomSelect
+                        compact
                         value={adj.employeeId}
-                        onChange={(e) => updateAdjustment(adj.id, 'employeeId', e.target.value)}
-                        style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', color: '#666' }}
+                        onChange={(value) => handleEmployeeChange(adj.id, value)}
+                        options={[{ value: '', label: t('attendance.selectEmployee') || 'Select employee' }, ...employeeOptions]}
+                        minWidth={220}
                       />
                     </td>
                     <td style={{ fontWeight: '500', position: 'sticky', left: '40px', background: 'white', zIndex: 1, width: '80px', minWidth: '80px' }}>
-                      <input 
-                        type="text" 
-                        value={adj.name}
-                        onChange={(e) => updateAdjustment(adj.id, 'name', e.target.value)}
-                        style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', fontWeight: '500' }}
-                      />
+                      <span style={{ display: 'inline-block', minWidth: '100%', color: adj.name ? 'inherit' : '#999' }}>
+                        {adj.name || (t('attendance.selectEmployee') || 'Select employee')}
+                      </span>
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '120px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
                       <CustomSelect
                         compact
-                        value={adj.role || ''}
-                        onChange={(v) => updateAdjustment(adj.id, 'role', v)}
-                        options={['TC.L1','TC.L2','TC.L3','Hall Asist','Infeeder','Sr.Infeeder','Ops.L1'].map(r => ({ value: r, label: r }))}
+                        value={adj.role || 'Ops.L1'}
+                        onChange={(v) => updateAdjustment(adj.id, 'role', v as Role)}
+                        options={ROLE_OPTIONS}
                       />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '190px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
@@ -125,25 +176,16 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                       <CustomSelect
                         compact
                         value={adj.workStatus || 'Prod.'}
-                        onChange={(v) => updateAdjustment(adj.id, 'workStatus', v)}
-                        options={[
-                          { value: 'Prod.', label: 'Prod.' },
-                          { value: 'Jail', label: 'Jail' },
-                          { value: 'DailyProduction', label: 'DailyProduction' },
-                        ]}
+                        onChange={(v) => updateAdjustment(adj.id, 'workStatus', v as WorkStatus)}
+                        options={WORK_STATUS_OPTIONS}
                       />
                     </td>
                     <td style={{ position: 'sticky', left: '330px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
                       <CustomSelect
                         compact
                         value={adj.shiftTeam || 'Green'}
-                        onChange={(v) => updateAdjustment(adj.id, 'shiftTeam', v)}
-                        options={[
-                          { value: 'Green', label: t('filter.green') },
-                          { value: 'Blue', label: t('filter.blue') },
-                          { value: 'Orange', label: t('filter.orange') },
-                          { value: 'Yellow', label: t('filter.yellow') },
-                        ]}
+                        onChange={(v) => updateAdjustment(adj.id, 'shiftTeam', v as ShiftTeam)}
+                        options={SHIFT_TEAM_VALUES.map(team => ({ value: team, label: t(`filter.${team.toLowerCase()}`) }))}
                       />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '400px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px', boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>
@@ -180,7 +222,10 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                       <input 
                         type="number" 
                         value={adj.hours}
-                        onChange={(e) => updateAdjustment(adj.id, 'hours', parseInt(e.target.value) || 0)}
+                        min={0}
+                        max={14}
+                        onChange={(e) => updateHours(adj.id, e.target.value)}
+                        aria-label={`${t('adjustment.duration')} ${adj.name || adj.employeeId || adj.id}`}
                         style={{ width: '60px', border: 'none', background: 'transparent', textAlign: 'center', outline: 'none' }}
                       />
                     </td>
@@ -203,6 +248,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                         value={adj.comments}
                         onChange={(e) => updateAdjustment(adj.id, 'comments', e.target.value)}
                         placeholder={t('adjustment.addNotes')}
+                        aria-label={`${t('adjustment.notes')} ${adj.name || adj.employeeId || adj.id}`}
                         style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none' }}
                       />
                     </td>
@@ -220,12 +266,6 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
               })}
             </tbody>
           </table>
-          <div style={{ padding: '12px', background: '#fafafa', borderTop: '1px solid var(--border-color)' }}>
-            <button onClick={addAdjustment} className="btn btn-ghost" style={{ fontSize: '13px' }}>
-              <Plus size={16} />
-              {t('adjustment.add')}
-            </button>
-          </div>
         </div>
       )}
     </div>

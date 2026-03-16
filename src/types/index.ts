@@ -28,9 +28,9 @@ export interface Adjustment {
   id: string;
   employeeId: string;
   name: string;
-  role?: string;
-  shiftTeam?: string;
-  gender?: string;
+  role?: Role;
+  shiftTeam?: ShiftTeam;
+  gender?: 'Male' | 'Female';
   hours: number;
   originalHours?: number;  // Hours before adjustment
   date: string;
@@ -38,6 +38,8 @@ export interface Adjustment {
   reason: string;
   adjustmentType?: PlanAdjustmentType;  // Overtime or Leave
   comments: string;
+  source?: 'local' | 'dataverse';
+  synced?: boolean;
   // New fields from reference
   type?: string;
   duration?: string;

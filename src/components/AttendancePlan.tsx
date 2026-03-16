@@ -1,17 +1,22 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, Check, RotateCcw, Sun, Moon } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useDeferredValue, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { Search, Sun, Moon } from 'lucide-react';
 import { fetchDataverseData, transformDataverseData, createAttendanceRecord, type TransformedData } from '../data/dataverseLoader';
 import { USE_MOCK_DATA } from '../data/mockData';
-import type { Employee, Adjustment, Role } from '../types';
+import type { Employee, Adjustment } from '../types';
 import AdjustmentTable from './AdjustmentTable';
 import CustomDatePicker from './ui/CustomDatePicker';
-import CustomSelect from './ui/CustomSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { validateShiftChange } from '../utils/attendanceValidation';
 import { useUserPhotos } from '../hooks/useUserPhotos';
 import { showToast } from './ui/Toast';
 import { TableRowSkeleton } from './ui/Skeleton';
+import { AttendancePlanHeader } from './attendance/AttendancePlanHeader';
+import { AttendancePlanToolbar } from './attendance/AttendancePlanToolbar';
+import { GallerySummaryBar } from './attendance/GallerySummaryBar';
 import { VirtualPivotTable } from './attendance/VirtualPivotTable';
+import { GalleryEmployeeRow } from './attendance/GalleryEmployeeRow';
+import { GENDER_OPTIONS, getShiftClass, ID_STATUS_OPTIONS, ROLE_OPTIONS, SHIFT_TEAM_VALUES, WORK_STATUS_OPTIONS } from '../constants/attendanceOptions';
 
 /*******************************************************************************
  * DATA MODEL – Three-Table Architecture
@@ -117,6 +122,80 @@ function toDateKeyFromIso(isoDate: string): string {
   return `${month}/${day}`;
 }
 
+const ATTENDANCE_PLAN_STORAGE_KEY = 'laborlink-attendance-plan-state-v1';
+
+interface PersistedAttendancePlanState {
+  version: 1;
+  planYear: number;
+  employees: Employee[];
+  adjustments: Adjustment[];
+  savedEmployees: Employee[];
+  savedAdjustments: Adjustment[];
+  pendingLeaveIds: string[];
+  hasChanges: boolean;
+}
+
+function createLocalAdjustmentId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `local-${crypto.randomUUID()}`;
+  }
+  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildPendingLeaveKey(empId: string, dateIso: string, shiftType: ShiftType): string {
+  return `${empId}|${dateIso}|${shiftType}`;
+}
+
+function isSameAdjustment(adjustment: Adjustment, employeeId: string, dateIso: string, isNight: boolean): boolean {
+  return adjustment.employeeId === employeeId && adjustment.date === dateIso && Boolean(adjustment.isNight) === isNight;
+}
+
+function mergeEmployeesWithLocal(baseEmployees: Employee[], localEmployees: Employee[]): Employee[] {
+  const localById = new Map(localEmployees.map(employee => [employee.id, employee]));
+  return baseEmployees.map(employee => {
+    const local = localById.get(employee.id);
+    if (!local) return employee;
+    return {
+      ...employee,
+      role: local.role,
+      indirectDirect: local.indirectDirect,
+      status: local.status,
+      shiftTeam: local.shiftTeam,
+      gender: local.gender,
+      shifts: local.shifts,
+    };
+  });
+}
+
+function readPersistedAttendancePlanState(planYear: number): PersistedAttendancePlanState | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(ATTENDANCE_PLAN_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedAttendancePlanState;
+    if (parsed.version !== 1 || parsed.planYear !== planYear) {
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    console.warn('Failed to read persisted attendance state:', error);
+    return null;
+  }
+}
+
+function writePersistedAttendancePlanState(state: PersistedAttendancePlanState): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(ATTENDANCE_PLAN_STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn('Failed to persist attendance state:', error);
+  }
+}
+
+const ADD_WORKER_ROW_HEIGHT = 48;
+
 
 interface AttendancePlanProps {
   isInitialized?: boolean;
@@ -143,7 +222,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [selectedShift, setSelectedShift] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   // View mode: editable pivot table vs vertical gallery
   const [viewMode, setViewMode] = useState<'pivot' | 'gallery'>('gallery');
@@ -161,6 +240,8 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   const [addEmployeeIds, setAddEmployeeIds] = useState<Set<string>>(new Set());
   const [addSearchQuery, setAddSearchQuery] = useState<string>('');
   const [addTeamFilter, setAddTeamFilter] = useState<'All' | 'Green' | 'Blue' | 'Orange' | 'Yellow'>('All');
+  const deferredAddSearchQuery = useDeferredValue(addSearchQuery);
+  const addWorkerListRef = useRef<HTMLDivElement>(null);
   // Selection state for delete functionality in the table
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   
@@ -199,10 +280,23 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
         
         const rawData = await fetchDataverseData();
         const transformed = transformDataverseData(rawData);
+        const persistedState = readPersistedAttendancePlanState(transformed.year);
+        const nextEmployees = persistedState
+          ? mergeEmployeesWithLocal(transformed.employees, persistedState.employees)
+          : transformed.employees;
+        const nextSavedEmployees = persistedState
+          ? mergeEmployeesWithLocal(transformed.employees, persistedState.savedEmployees)
+          : structuredClone(nextEmployees);
+        const nextAdjustments = persistedState?.adjustments ?? [];
+        const nextSavedAdjustments = persistedState?.savedAdjustments ?? [];
         
         setDataverseData(transformed);
-        setEmployees(transformed.employees);
-        setSavedEmployees(structuredClone(transformed.employees));
+        setEmployees(nextEmployees);
+        setSavedEmployees(nextSavedEmployees);
+        setAdjustments(nextAdjustments);
+        setSavedAdjustments(nextSavedAdjustments);
+        setPendingLeaveIds(new Set(persistedState?.pendingLeaveIds ?? []));
+        setHasChanges(Boolean(persistedState?.hasChanges));
         
         // Gallery default date picker should be "today" (UTC+8) when available
         if (transformed.dateKeys.length > 0) {
@@ -234,11 +328,20 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     loadDataverseData();
   }, [isInitialized]);
 
-  // Debounce search input (300ms delay) for better performance
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+    if (!dataverseData) return;
+
+    writePersistedAttendancePlanState({
+      version: 1,
+      planYear,
+      employees,
+      adjustments,
+      savedEmployees,
+      savedAdjustments,
+      pendingLeaveIds: Array.from(pendingLeaveIds),
+      hasChanges,
+    });
+  }, [adjustments, dataverseData, employees, hasChanges, pendingLeaveIds, planYear, savedAdjustments, savedEmployees]);
 
   /**
    * "Confirm" action.
@@ -247,140 +350,122 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
    * Also processes pending leave employees: creates Leave adjustments and sets their hours to 0.
    */
   const handleConfirm = useCallback(async () => {
-    // First, process pending leave employees
-    // Convert pending leaves to actual adjustments and set hours to 0
     const pendingLeaveArray = Array.from(pendingLeaveIds);
-    const leaveAdjustmentsToAdd: Adjustment[] = [];
-    
-    // Track which employee/date/shift combinations we've already processed to avoid duplicates
-    const processedLeaveKeys = new Set<string>();
-    
+    let nextEmployees = employees;
+    let nextAdjustments = [...adjustments];
+
     if (pendingLeaveArray.length > 0) {
-      // First pass: determine which adjustments to create (outside of setEmployees)
-      pendingLeaveArray.forEach(key => {
-        const [empId, dateKey, shiftType] = key.split('|');
-        const emp = employees.find(e => e.id === empId);
-        if (!emp) return;
-        
-        const isNight = shiftType === 'Night';
-        const dateStr = toIsoDateFromKey(planYear, dateKey);
-        const leaveKey = `${empId}|${dateStr}|${isNight}`;
-        
-        // Check if already exists in current adjustments state
-        const alreadyInAdjustments = adjustments.some(a => 
-          a.employeeId === empId && 
-          a.date === dateStr && 
-          a.isNight === isNight && 
-          a.adjustmentType === 'Leave'
-        );
-        
-        // Check if we've already added this in this batch
-        const alreadyProcessed = processedLeaveKeys.has(leaveKey);
-        
-        if (!alreadyInAdjustments && !alreadyProcessed) {
-          const shiftEntry = emp.shifts[dateKey];
-          const originalValue = isNight ? (shiftEntry?.night || '') : (shiftEntry?.day || '');
-          const originalHours = parseInt(originalValue) || 12;
-          
-          leaveAdjustmentsToAdd.push({
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-            employeeId: emp.id,
-            name: emp.name,
-            role: emp.role,
-            indirectDirect: emp.indirectDirect,
-            workStatus: emp.status,
-            shiftTeam: emp.shiftTeam,
-            gender: emp.gender,
-            date: dateStr,
-            isNight: isNight,
-            originalHours: originalHours,
+      nextEmployees = employees.map(employee => {
+        const matchingEntry = pendingLeaveArray.some(key => {
+          const [empId] = key.split('|');
+          return empId === employee.id;
+        });
+        if (!matchingEntry) return employee;
+
+        const updatedShifts = { ...employee.shifts };
+        pendingLeaveArray.forEach(key => {
+          const [empId, dateIso, shiftType] = key.split('|') as [string, string, ShiftType];
+          if (empId !== employee.id) return;
+          const dateKey = toDateKeyFromIso(dateIso);
+          const shiftEntry = updatedShifts[dateKey] ?? { day: '', night: '' };
+          updatedShifts[dateKey] = shiftType === 'Night'
+            ? { ...shiftEntry, night: '' }
+            : { ...shiftEntry, day: '' };
+
+          const originalValue = shiftType === 'Night' ? (employee.shifts[dateKey]?.night || '') : (employee.shifts[dateKey]?.day || '');
+          const originalHours = parseInt(originalValue, 10) || 12;
+          const isNight = shiftType === 'Night';
+
+          const leaveAdjustment: Adjustment = {
+            id: nextAdjustments.find(adj => isSameAdjustment(adj, employee.id, dateIso, isNight))?.id ?? createLocalAdjustmentId(),
+            employeeId: employee.id,
+            name: employee.name,
+            role: employee.role,
+            indirectDirect: employee.indirectDirect,
+            workStatus: employee.status,
+            shiftTeam: employee.shiftTeam,
+            gender: employee.gender,
+            date: dateIso,
+            isNight,
+            originalHours,
             hours: 0,
             adjustmentType: 'Leave',
             reason: 'Leave',
-            comments: ''
-          });
-          processedLeaveKeys.add(leaveKey);
-        }
-      });
-      
-      // Second pass: update employees' hours to 0 for pending leaves
-      setEmployees(prevEmployees => {
-        const updatedEmployees = [...prevEmployees];
-        pendingLeaveArray.forEach(key => {
-          const [empId, dateKey, shiftType] = key.split('|');
-          const empIndex = updatedEmployees.findIndex(e => e.id === empId);
-          if (empIndex >= 0) {
-            const emp = updatedEmployees[empIndex];
-            const isNight = shiftType === 'Night';
-            
-            // Set hours to 0
-            const newShifts = { ...emp.shifts };
-            if (!newShifts[dateKey]) {
-              newShifts[dateKey] = { day: '', night: '' };
-            }
-            if (isNight) {
-              newShifts[dateKey] = { ...newShifts[dateKey], night: '0' };
-            } else {
-              newShifts[dateKey] = { ...newShifts[dateKey], day: '0' };
-            }
-            updatedEmployees[empIndex] = { ...emp, shifts: newShifts };
+            comments: nextAdjustments.find(adj => isSameAdjustment(adj, employee.id, dateIso, isNight))?.comments ?? '',
+            source: 'local',
+            synced: false,
+          };
+
+          const existingIndex = nextAdjustments.findIndex(adj => isSameAdjustment(adj, employee.id, dateIso, isNight));
+          if (existingIndex >= 0) {
+            nextAdjustments[existingIndex] = leaveAdjustment;
+          } else {
+            nextAdjustments.push(leaveAdjustment);
           }
         });
-        return updatedEmployees;
+
+        return { ...employee, shifts: updatedShifts };
       });
-      
-      // Add leave adjustments
-      setAdjustments(prev => [...prev, ...leaveAdjustmentsToAdd]);
-      
-      // Clear pending leaves
-      setPendingLeaveIds(new Set());
-    }
-    
-    // Combine existing adjustments with new leave adjustments for saving
-    // Note: leaveAdjustmentsToAdd already added to state above, but state update is async
-    // So we need to manually combine for the save operation
-    const allAdjustmentsToSave = [...adjustments, ...leaveAdjustmentsToAdd];
-    
-    // Only save NEW adjustments (those not yet persisted)
-    // In a full implementation, we'd track which are already in Dataverse.
-    // For now, we save all adjustments that don't have a Dataverse ID pattern.
-    const newAdjustments = allAdjustmentsToSave.filter(adj => {
-      // Local IDs are timestamp-based (numeric strings); Dataverse IDs are GUIDs
-      return /^\d+$/.test(adj.id);
-    });
-
-    if (newAdjustments.length > 0) {
-      try {
-        // Save each adjustment to ll_fAttendanceRecord
-        const savePromises = newAdjustments.map(adj => {
-          // Map shiftTeam to colorshift value expected by Dataverse
-          const colorShift = adj.shiftTeam ?? 'Green';
-          
-          return createAttendanceRecord({
-            hours: String(adj.hours),
-            action: adj.adjustmentType ?? 'Overtime', // 'Overtime' or 'Leave'
-            dayNightShift: adj.isNight ? 'Night' : 'Day',
-            colorShift: colorShift,
-            area: '', // Could be derived from employee's area if available
-            department: '' // Could be derived from employee's department if available
-          });
-        });
-
-        await Promise.all(savePromises);
-        console.log(`Saved ${newAdjustments.length} adjustment(s) to Dataverse`);
-      } catch (error) {
-        console.error('Failed to save adjustments to Dataverse:', error);
-        showToast(t('attendance.saveFailed') || 'Failed to save some adjustments. Please try again.', 'error');
-        return; // Don't update local state if save failed
-      }
     }
 
-    // Update local snapshot
-    setSavedEmployees(structuredClone(employees));
-    setSavedAdjustments(structuredClone(adjustments));
+    setEmployees(nextEmployees);
+    setAdjustments(nextAdjustments);
+    setPendingLeaveIds(new Set());
+
+    const unsyncedAdjustments = nextAdjustments.filter(adj => !adj.synced);
+    if (unsyncedAdjustments.length === 0) {
+      setSavedEmployees(structuredClone(nextEmployees));
+      setSavedAdjustments(structuredClone(nextAdjustments));
+      setGalleryHourDrafts({});
+      setSelectedRowIds(new Set());
+      setHasChanges(false);
+      showToast(t('attendance.changesSaved') || 'Changes saved successfully!', 'success');
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      unsyncedAdjustments.map(adj =>
+        createAttendanceRecord({
+          hours: String(adj.hours),
+          action: adj.adjustmentType ?? 'Overtime',
+          dayNightShift: adj.isNight ? 'Night' : 'Day',
+          colorShift: adj.shiftTeam ?? 'Green',
+          area: '',
+          department: '',
+        }),
+      ),
+    );
+
+    const failedCount = results.filter(result => result.status === 'rejected').length;
+    const syncedIds = new Set(
+      results
+        .map((result, index) => (result.status === 'fulfilled' ? unsyncedAdjustments[index].id : null))
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    const synchronizedAdjustments = nextAdjustments.map(adj => (
+      syncedIds.has(adj.id) ? { ...adj, synced: true } : adj
+    ));
+
+    setAdjustments(synchronizedAdjustments);
+
+    if (failedCount > 0) {
+      console.error(`Failed to save ${failedCount} adjustment(s) to Dataverse`);
+      setHasChanges(true);
+      showToast(
+        t('attendance.saveFailed') || `Failed to save ${failedCount} adjustment(s). Please try again.`,
+        'error',
+      );
+      return;
+    }
+
+    setSavedEmployees(structuredClone(nextEmployees));
+    setSavedAdjustments(structuredClone(synchronizedAdjustments));
+    setGalleryHourDrafts({});
+    setSelectedRowIds(new Set());
     setHasChanges(false);
     showToast(t('attendance.changesSaved') || 'Changes saved successfully!', 'success');
-  }, [employees, adjustments, pendingLeaveIds, planYear, t]);
+  }, [adjustments, employees, pendingLeaveIds, t]);
 
   /**
    * "Reset" action.
@@ -391,6 +476,12 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setEmployees(structuredClone(savedEmployees));
     setAdjustments(structuredClone(savedAdjustments));
     setPendingLeaveIds(new Set());
+    setGalleryHourDrafts({});
+    setSelectedRowIds(new Set());
+    setShowAddPicker(false);
+    setAddEmployeeIds(new Set());
+    setAddSearchQuery('');
+    setAddTeamFilter('All');
     setHasChanges(false);
   }, [savedEmployees, savedAdjustments]);
 
@@ -414,6 +505,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return dataverseData?.dateKeys?.length ? dataverseData.dateKeys : [];
   }, [dataverseData]);
 
+  const selectedDateIso = useMemo(() => {
+    return toIsoDateFromKey(planYear, selectedDateKey);
+  }, [planYear, selectedDateKey]);
+
   /**
    * Updates a single day/night cell in the schedule grid.
    * Also creates an `Adjustment` record when the edit implies Overtime or Leave.
@@ -426,9 +521,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const originalHours = parseInt(originalValue) || 0;
     const newHours = parseInt(newValue) || 0;
     const normalizedValue = newHours === 0 ? '' : String(newHours);
+    const dateStr = toIsoDateFromKey(planYear, date);
 
     // Validate the change against attendance rules
-    const validation = validateShiftChange(emp, date, isNight, newHours, employees, allDates);
+    const validation = validateShiftChange(emp, date, isNight, newHours, employees, allDates, planYear);
     
     if (!validation.isValid) {
       // Show violation alert - revert employee state to original value
@@ -497,13 +593,15 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     }
 
     // Auto-add adjustment record if there's a meaningful change
-    if (adjustmentType) {
-      const year = new Date().getFullYear();
-      const [month, day] = date.split('/').map(Number);
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      
-      const newAdjustment: Adjustment = {
-        id: Date.now().toString(),
+    setAdjustments(prev => {
+      const existing = prev.find(adj => isSameAdjustment(adj, emp.id, dateStr, isNight));
+
+      if (!adjustmentType) {
+        return prev.filter(adj => !isSameAdjustment(adj, emp.id, dateStr, isNight));
+      }
+
+      const nextAdjustment: Adjustment = {
+        id: existing?.id ?? createLocalAdjustmentId(),
         employeeId: emp.id,
         name: emp.name,
         role: emp.role,
@@ -512,18 +610,26 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
         shiftTeam: emp.shiftTeam,
         gender: emp.gender,
         date: dateStr,
-        isNight: isNight,
-        originalHours: originalHours,
+        isNight,
+        originalHours,
         hours: newHours,
-        adjustmentType: adjustmentType,
-        reason: reason,
-        comments: ''
+        adjustmentType,
+        reason,
+        comments: existing?.comments ?? '',
+        source: 'local',
+        synced: false,
       };
-      
-      setAdjustments(prev => [...prev, newAdjustment]);
-    }
+
+      if (!existing) {
+        return [...prev, nextAdjustment];
+      }
+
+      return prev.map(adj => (
+        isSameAdjustment(adj, emp.id, dateStr, isNight) ? nextAdjustment : adj
+      ));
+    });
     setHasChanges(true);
-  }, [employees, allDates]);
+  }, [allDates, employees, planYear]);
 
   // Date window filter: always show -1 to +12 days from anchor date
   const baseDateForWindow = useMemo(() => {
@@ -577,10 +683,10 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   };
 
   // Apply filters directly to the displayed rows.
-  // Uses debounced search for better performance when typing.
+  // Uses deferred search for better performance when typing.
   // Color shift filter only applies in pivot view, not in gallery view.
   const filteredEmployees = useMemo(() => {
-    const query = debouncedSearch.toLowerCase().trim();
+    const query = deferredSearchQuery.toLowerCase().trim();
     return employees.filter(emp => {
       // Only apply shift filter in pivot view
       if (viewMode === 'pivot' && selectedShift !== 'All' && emp.shiftTeam !== selectedShift) return false;
@@ -591,18 +697,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       }
       return true;
     });
-  }, [employees, selectedShift, debouncedSearch, viewMode]);
-
-  /** Maps a shift team value to a CSS badge class. */
-  const getShiftClass = (team: string) => {
-    switch (team) {
-      case 'Green': return 'badge-green';
-      case 'Blue': return 'badge-blue';
-      case 'Orange': return 'badge-orange';
-      case 'Yellow': return 'badge-yellow';
-      default: return '';
-    }
-  };
+  }, [employees, selectedShift, deferredSearchQuery, viewMode]);
 
   /** Maps a shift team value to a subtle row background color for readability. */
   const getRowBackgroundColor = (team: string) => {
@@ -652,23 +747,23 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     // Exclude employees who are pending leave for this slice
     return filteredEmployees.filter(emp => {
       if (!scheduledIdSet.has(emp.id)) return false;
-      const pendingKey = `${emp.id}|${selectedDateKey}|${selectedShiftType}`;
+      const pendingKey = buildPendingLeaveKey(emp.id, selectedDateIso, selectedShiftType);
       if (pendingLeaveIds.has(pendingKey)) return false;
       return true;
     });
-  }, [filteredEmployees, scheduledIdSet, pendingLeaveIds, selectedDateKey, selectedShiftType]);
+  }, [filteredEmployees, pendingLeaveIds, scheduledIdSet, selectedDateIso, selectedShiftType]);
 
   // Compute employees pending leave for the current slice
   const pendingLeaveEmployeesForSlice = useMemo(() => {
     return employees.filter(emp => {
-      const pendingKey = `${emp.id}|${selectedDateKey}|${selectedShiftType}`;
+      const pendingKey = buildPendingLeaveKey(emp.id, selectedDateIso, selectedShiftType);
       return pendingLeaveIds.has(pendingKey);
     });
-  }, [employees, pendingLeaveIds, selectedDateKey, selectedShiftType]);
+  }, [employees, pendingLeaveIds, selectedDateIso, selectedShiftType]);
 
   /** Toggle an employee's pending leave status for the current slice */
   const togglePendingLeave = useCallback((empId: string) => {
-    const pendingKey = `${empId}|${selectedDateKey}|${selectedShiftType}`;
+    const pendingKey = buildPendingLeaveKey(empId, selectedDateIso, selectedShiftType);
     setPendingLeaveIds(prev => {
       const next = new Set(prev);
       if (next.has(pendingKey)) {
@@ -679,11 +774,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       return next;
     });
     setHasChanges(true);
-  }, [selectedDateKey, selectedShiftType]);
+  }, [selectedDateIso, selectedShiftType]);
 
   /** Recall (cancel) an employee from pending leave */
   const recallFromPendingLeave = useCallback((empId: string) => {
-    const pendingKey = `${empId}|${selectedDateKey}|${selectedShiftType}`;
+    const pendingKey = buildPendingLeaveKey(empId, selectedDateIso, selectedShiftType);
     setPendingLeaveIds(prev => {
       const next = new Set(prev);
       next.delete(pendingKey);
@@ -691,11 +786,14 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     });
     // Check if there are still any pending changes
     setHasChanges(prev => prev || pendingLeaveIds.size > 1);
-  }, [selectedDateKey, selectedShiftType, pendingLeaveIds]);
+  }, [pendingLeaveIds, selectedDateIso, selectedShiftType]);
 
   // Fetch user photos from Office365 for gallery employees
   const galleryEmails = useMemo(() => galleryEmployees.map(emp => emp.email || '').filter(Boolean), [galleryEmployees]);
   const { photos: userPhotos } = useUserPhotos(galleryEmails);
+  const idStatusOptions = useMemo(() => ID_STATUS_OPTIONS.map(option => ({ value: option.value, label: t(option.translationKey) })), [t]);
+  const shiftTeamOptions = useMemo(() => SHIFT_TEAM_VALUES.map(team => ({ value: team, label: t(`filter.${team.toLowerCase()}`) })), [t]);
+  const genderOptions = useMemo(() => GENDER_OPTIONS.map(option => ({ value: option.value, label: t(option.translationKey) })), [t]);
 
   const availableEmployeesForGallery = useMemo(() => {
     // Per spec: choose from whole list not currently in this gallery slice
@@ -703,13 +801,22 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   }, [employees, scheduledIdSet]);
 
   const filteredAvailableEmployeesForGallery = useMemo(() => {
-    const query = addSearchQuery.toLowerCase().trim();
+    const query = deferredAddSearchQuery.toLowerCase().trim();
     return availableEmployeesForGallery.filter(emp => {
       if (addTeamFilter !== 'All' && emp.shiftTeam !== addTeamFilter) return false;
       if (!query) return true;
       return emp.id.toLowerCase().includes(query) || emp.name.toLowerCase().includes(query);
     });
-  }, [availableEmployeesForGallery, addSearchQuery, addTeamFilter]);
+  }, [availableEmployeesForGallery, deferredAddSearchQuery, addTeamFilter]);
+
+  const addWorkerVirtualizer = useVirtualizer({
+    count: filteredAvailableEmployeesForGallery.length,
+    getScrollElement: () => addWorkerListRef.current,
+    estimateSize: () => ADD_WORKER_ROW_HEIGHT,
+    overscan: 10,
+  });
+
+  const addWorkerVirtualRows = addWorkerVirtualizer.getVirtualItems();
 
   /*---------------------------------------------------------------------------
    * ADJUSTMENT RECORDS → ll_fAttendanceRecord (exceptions only)
@@ -723,6 +830,38 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   useEffect(() => {
     setGalleryHourDrafts({});
   }, [gallerySliceKey]);
+
+  const handleGalleryHourDraftChange = useCallback((draftKey: string, value: string) => {
+    setGalleryHourDrafts(prev => ({
+      ...prev,
+      [draftKey]: { value, touched: true },
+    }));
+  }, []);
+
+  const handleGalleryHourDraftCommit = useCallback((emp: Employee, draftKey: string, draft?: { value: string; touched: boolean }) => {
+    if (!draft?.touched) return;
+
+    const isNight = selectedShiftType === 'Night';
+    const shiftEntry = emp.shifts[selectedDateKey];
+    const storedRaw = isNight ? (shiftEntry?.night || '') : (shiftEntry?.day || '');
+    const storedParsed = parseInt(String(storedRaw || '0'), 10);
+    const previousValue = Number.isFinite(storedParsed) && storedParsed > 0 ? String(storedParsed) : '0';
+    const nextValue = String(parseInt(draft.value, 10) || 0);
+
+    if (nextValue === previousValue) {
+      setGalleryHourDrafts(prev => ({
+        ...prev,
+        [draftKey]: { value: '', touched: false },
+      }));
+      return;
+    }
+
+    handleShiftChange(emp, selectedDateKey, isNight, nextValue);
+    setGalleryHourDrafts(prev => ({
+      ...prev,
+      [draftKey]: { value: '', touched: false },
+    }));
+  }, [handleShiftChange, selectedDateKey, selectedShiftType]);
 
 
   /**
@@ -764,15 +903,14 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
    */
   const handleDeleteSelectedWorkers = useCallback(() => {
     if (selectedRowIds.size === 0) return;
-    
+
     selectedRowIds.forEach(empId => {
       const emp = employees.find(e => e.id === empId);
       if (emp) {
-        // Set hours to 0 to remove from slice
         handleShiftChange(emp, selectedDateKey, selectedShiftType === 'Night', '0');
       }
     });
-    
+
     setSelectedRowIds(new Set());
     setHasChanges(true);
   }, [selectedRowIds, employees, handleShiftChange, selectedDateKey, selectedShiftType]);
@@ -807,10 +945,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setAddTeamFilter('All');
   }, []);
 
-  const selectedDateIso = useMemo(() => {
-    return toIsoDateFromKey(planYear, selectedDateKey);
-  }, [selectedDateKey]);
-
   const sliceAdjustments = useMemo(() => {
     const isNight = selectedShiftType === 'Night';
     return adjustments.filter(a => a.date === selectedDateIso && a.isNight === isNight);
@@ -824,19 +958,15 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return sliceAdjustments.filter(a => a.adjustmentType === 'Leave').length;
   }, [sliceAdjustments]);
 
-  // Detect which team is scheduled in the current slice (auto-detect from scheduled workers)
   const currentSliceTeam = useMemo(() => {
-    // Get all employees scheduled in the current slice
     const scheduledEmps = employees.filter(emp => scheduledIdSet.has(emp.id));
     if (scheduledEmps.length === 0) return null;
-    
-    // Find the most common team among scheduled employees
+
     const teamCounts: Record<string, number> = {};
     for (const emp of scheduledEmps) {
       teamCounts[emp.shiftTeam] = (teamCounts[emp.shiftTeam] || 0) + 1;
     }
-    
-    // Return the team with most scheduled workers
+
     let maxTeam: string | null = null;
     let maxCount = 0;
     for (const [team, count] of Object.entries(teamCounts)) {
@@ -848,14 +978,12 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     return maxTeam;
   }, [employees, scheduledIdSet]);
 
-  // Last slice (previous working shift for the auto-detected team from current slice)
   const lastSlice = useMemo(() => {
     const fallbackLastShiftType: ShiftType = selectedShiftType === 'Day' ? 'Night' : 'Day';
     const fallbackLastDateIso = selectedShiftType === 'Day' ? isoAddDays(selectedDateIso, -1) : selectedDateIso;
     const fallbackLastDateKey = toDateKeyFromIso(fallbackLastDateIso);
     const fallbackResult = { lastShiftType: fallbackLastShiftType, lastDateIso: fallbackLastDateIso, lastDateKey: fallbackLastDateKey, lastTeam: currentSliceTeam };
 
-    // Use auto-detected team from current slice
     if (!currentSliceTeam) {
       return fallbackResult;
     }
@@ -879,7 +1007,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       return Number.isFinite(parsed) ? parsed : 0;
     };
 
-    // If user is viewing Night, check same-date Day first (Day is earlier within the same date).
     if (selectedShiftType === 'Night') {
       const dayHours = getHours(selectedDateKey, 'Day');
       if (dayHours > 0) {
@@ -888,7 +1015,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       }
     }
 
-    // Scan backwards by date; for each date, Night is later than Day.
     for (let i = selectedIndex - 1; i >= 0; i--) {
       const dateKey = allKeys[i];
       const nightHours = getHours(dateKey, 'Night');
@@ -918,14 +1044,12 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   }, [employees, lastSlice.lastDateKey, lastSlice.lastShiftType]);
 
   const lastSliceEmployees = useMemo(() => {
-    // Use the auto-detected team from current slice
     const teamFiltered = currentSliceTeam ? employees.filter(e => e.shiftTeam === currentSliceTeam) : employees;
     return teamFiltered.filter(e => lastScheduledIdSet.has(e.id));
   }, [employees, currentSliceTeam, lastScheduledIdSet]);
 
   const lastSliceAdjustments = useMemo(() => {
     const isNight = lastSlice.lastShiftType === 'Night';
-    // Use the auto-detected team from current slice
     const teamFiltered = currentSliceTeam
       ? adjustments.filter(a => a.shiftTeam === currentSliceTeam)
       : adjustments;
@@ -952,20 +1076,18 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     const leaveIds = new Set(
       lastSliceAdjustments
         .filter(a => a.adjustmentType === 'Leave' && a.indirectDirect === 'Direct')
-        .map(a => a.employeeId)
+        .map(a => a.employeeId),
     );
-    const arrived = lastSliceEmployees.filter(e => e.indirectDirect === 'Direct' && !leaveIds.has(e.id)).length;
-    return arrived;
+    return lastSliceEmployees.filter(e => e.indirectDirect === 'Direct' && !leaveIds.has(e.id)).length;
   }, [lastSliceAdjustments, lastSliceEmployees]);
 
   const lastSliceThirdPartyArrived = useMemo(() => {
     const leaveIds = new Set(
       lastSliceAdjustments
         .filter(a => a.adjustmentType === 'Leave' && a.indirectDirect === 'Indirect')
-        .map(a => a.employeeId)
+        .map(a => a.employeeId),
     );
-    const arrived = lastSliceEmployees.filter(e => e.indirectDirect === 'Indirect' && !leaveIds.has(e.id)).length;
-    return arrived;
+    return lastSliceEmployees.filter(e => e.indirectDirect === 'Indirect' && !leaveIds.has(e.id)).length;
   }, [lastSliceAdjustments, lastSliceEmployees]);
 
   // Loading state — skeleton table rows instead of blocking spinner
@@ -1005,140 +1127,29 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   return (
     // Layout: header + toolbar + table + adjustment panel
     <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', height: '100%', minHeight: 0 }}>
-      {/* Header - Compact single line */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>{t('attendance.title')}</h1>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{t('attendance.subtitle')}</span>
-        </div>
-        <span style={{
-          fontSize: '11px',
-          padding: '2px 8px',
-          borderRadius: '10px',
-          background: '#e8f5e9',
-          color: '#2e7d32',
-          fontWeight: 500
-        }}>
-          {`☁️ Dataverse (${dataverseData?.employees.length ?? 0} employees)`}
-        </span>
-      </div>
+      <AttendancePlanHeader
+        title={t('attendance.title')}
+        subtitle={t('attendance.subtitle')}
+        statusText={`☁️ Dataverse (${dataverseData?.employees.length ?? 0} employees)`}
+      />
 
       {/* Schedule Editor */}
       <div className='card' style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
-          <div className='flex items-center gap-4'>
-            <div style={{ position: 'relative' }}>
-              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
-              <input 
-                type='text' 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('attendance.search')} 
-                className='input'
-                style={{ paddingLeft: '36px', width: '250px' }}
-              />
-            </div>
-            {/* Color shift filter only visible in pivot view */}
-            {viewMode === 'pivot' && (
-              <div className='flex gap-2'>
-                {['All', 'Green', 'Blue', 'Orange', 'Yellow'].map(filter => (
-                  <button 
-                    key={filter} 
-                    onClick={() => setSelectedShift(filter)}
-                    className={`btn ${selectedShift === filter ? 'btn-secondary' : 'btn-ghost'}`}
-                    style={{ 
-                      fontSize: '14px', 
-                      padding: '8px 20px',
-                      backgroundColor: selectedShift === filter ? '#eff6ff' : 'transparent',
-                      color: selectedShift === filter ? 'var(--accent-blue)' : 'inherit'
-                    }}
-                  >
-                    {t(filterKeys[filter])}
-                  </button>
-                ))}
-              </div>
-            )}
-
-          </div>
-          {/* Confirm and Reset Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div className='nav-tabs' aria-label='Attendance view mode'>
-              <button
-                onClick={() => setViewMode('pivot')}
-                className={`nav-tab ${viewMode === 'pivot' ? 'active' : ''}`}
-                type='button'
-              >
-                {t('attendance.viewPivot')}
-              </button>
-              <button
-                onClick={() => setViewMode('gallery')}
-                className={`nav-tab ${viewMode === 'gallery' ? 'active' : ''}`}
-                type='button'
-              >
-                {t('attendance.viewGallery')}
-              </button>
-            </div>
-            <button
-              onClick={handleReset}
-              disabled={!hasChanges}
-              className='btn'
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 16px',
-                fontSize: '14px',
-                backgroundColor: hasChanges ? '#fff3e0' : '#f5f5f5',
-                color: hasChanges ? '#e65100' : '#999',
-                border: `1px solid ${hasChanges ? '#ffcc80' : '#e0e0e0'}`,
-                cursor: hasChanges ? 'pointer' : 'not-allowed',
-                opacity: hasChanges ? 1 : 0.6,
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <RotateCcw size={16} />
-              {t('attendance.reset') || 'Reset'}
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={!hasChanges}
-              className='btn'
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 16px',
-                fontSize: '14px',
-                backgroundColor: hasChanges ? '#4caf50' : '#f5f5f5',
-                color: hasChanges ? '#fff' : '#999',
-                border: `1px solid ${hasChanges ? '#4caf50' : '#e0e0e0'}`,
-                cursor: hasChanges ? 'pointer' : 'not-allowed',
-                opacity: hasChanges ? 1 : 0.6,
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <Check size={16} />
-              {t('attendance.confirm') || 'Confirm'}
-              {(pendingLeaveIds.size + adjustments.filter(a => /^\d+/.test(a.id)).length) > 0 && (
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 18,
-                  height: 18,
-                  padding: '0 5px',
-                  borderRadius: 999,
-                  background: 'rgba(255,255,255,0.3)',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  lineHeight: 1,
-                }}>
-                  {pendingLeaveIds.size + adjustments.filter(a => /^\d+/.test(a.id)).length}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
+        <AttendancePlanToolbar
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          showShiftFilters={viewMode === 'pivot'}
+          selectedShift={selectedShift}
+          onSelectShift={setSelectedShift}
+          filterKeys={filterKeys}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          onReset={handleReset}
+          onConfirm={handleConfirm}
+          hasChanges={hasChanges}
+          pendingChangeCount={pendingLeaveIds.size + adjustments.filter(a => !a.synced).length}
+          t={t}
+        />
 
         {viewMode === 'pivot' ? (
           <VirtualPivotTable
@@ -1321,71 +1332,21 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
 
             {/* Main: cards + table */}
             <div style={{ padding: '8px', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {/* Compact horizontal stats row */}
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                {/* Quick stats - inline compact cards */}
-                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.totalWorkers')}</span>
-                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{employees.length}</span>
-                </div>
-                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.scheduledSlice')}</span>
-                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{galleryEmployees.length}</span>
-                </div>
-                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.overtimeSlice')}</span>
-                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{sliceOvertimeCount}</span>
-                </div>
-                <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{t('attendance.leaveSlice')}</span>
-                  <span style={{ fontSize: '16px', fontWeight: 800 }}>{sliceLeaveCount}</span>
-                </div>
-
-                {/* Divider */}
-                <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
-
-                {/* Last Color Shift label + meta + compact cards (same height as other cards) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)' }}>
-                    {t('attendance.lastColorShift')}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      padding: '2px 10px',
-                      borderRadius: '999px',
-                      border: '1px solid #dbeafe',
-                      background: '#eff6ff',
-                      color: 'var(--accent-blue)',
-                      fontWeight: 700,
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {lastSlice.lastDateKey} • {lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')} • {lastSlice.lastTeam ? t(filterKeys[lastSlice.lastTeam] || lastSlice.lastTeam) : '-'}
-                  </span>
-
-                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {t('attendance.actualArrivedPlanInternal')}
-                    </span>
-                    <span style={{ fontSize: '16px', fontWeight: 800, whiteSpace: 'nowrap' }}>{lastSliceInternalArrived}/{lastSliceInternalPlan}</span>
-                  </div>
-                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {t('attendance.actualArrivedPlanThirdParty')}
-                    </span>
-                    <span style={{ fontSize: '16px', fontWeight: 800, whiteSpace: 'nowrap' }}>{lastSliceThirdPartyArrived}/{lastSliceThirdPartyPlan}</span>
-                  </div>
-                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('attendance.overtimeWorkers')}</span>
-                    <span style={{ fontSize: '16px', fontWeight: 800 }}>{lastSliceOvertimeCount}</span>
-                  </div>
-                  <div className='card' style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('attendance.leaveWorkers')}</span>
-                    <span style={{ fontSize: '16px', fontWeight: 800 }}>{lastSliceLeaveCount}</span>
-                  </div>
-                </div>
-              </div>
+              <GallerySummaryBar
+                employeesCount={employees.length}
+                scheduledCount={galleryEmployees.length}
+                overtimeCount={sliceOvertimeCount}
+                leaveCount={sliceLeaveCount}
+                lastSliceLabel={`${lastSlice.lastDateKey} • ${lastSlice.lastShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}`}
+                lastSliceTeamLabel={lastSlice.lastTeam ? t(filterKeys[lastSlice.lastTeam] || lastSlice.lastTeam) : '-'}
+                lastSliceInternalArrived={lastSliceInternalArrived}
+                lastSliceInternalPlan={lastSliceInternalPlan}
+                lastSliceThirdPartyArrived={lastSliceThirdPartyArrived}
+                lastSliceThirdPartyPlan={lastSliceThirdPartyPlan}
+                lastSliceOvertimeCount={lastSliceOvertimeCount}
+                lastSliceLeaveCount={lastSliceLeaveCount}
+                t={t}
+              />
 
               {/* Table card with header and actions */}
               <div className='card' style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -1567,7 +1528,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                                     cursor: 'pointer'
                                   }}
                                 >
-                                  {team}
+                                  {team === 'All' ? t('filter.all') : t(`filter.${team.toLowerCase()}`)}
                                 </button>
                               );
                             })}
@@ -1591,6 +1552,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                         </div>
 
                         <div
+                          ref={addWorkerListRef}
                           style={{
                             flex: 1,
                             minHeight: 0,
@@ -1599,56 +1561,69 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                             borderRadius: 10,
                             background: 'linear-gradient(to bottom, #f8fafc, #fff)',
                             padding: 10,
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            gap: 8,
-                            alignContent: 'flex-start'
                           }}
                         >
-                          {filteredAvailableEmployeesForGallery.map(emp => {
-                            const isSelected = addEmployeeIds.has(emp.id);
-                            // Get border color based on shift team
-                            const shiftBorderColor = emp.shiftTeam === 'Green' ? '#22c55e' 
-                              : emp.shiftTeam === 'Blue' ? '#3b82f6' 
-                              : emp.shiftTeam === 'Orange' ? '#f97316' 
-                              : emp.shiftTeam === 'Yellow' ? '#eab308' 
-                              : '#e0e0e0';
-                            return (
-                              <button
-                                key={emp.id}
-                                onClick={() => toggleAddEmployeeSelection(emp.id)}
-                                className='btn'
-                                type='button'
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '12px',
-                                  borderRadius: '8px',
-                                  border: isSelected ? '2px solid var(--accent-blue)' : `2px solid ${shiftBorderColor}`,
-                                  background: isSelected ? '#eff6ff' : 'white',
-                                  color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'flex-start',
-                                  gap: '8px',
-                                  transition: 'all 0.15s ease',
-                                  minWidth: '180px',
-                                  maxWidth: '220px',
-                                  textAlign: 'left'
-                                }}
-                              >
-                                {isSelected && <span style={{ fontSize: '14px' }}>✓</span>}
-                                <span style={{ fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', minWidth: '50px' }}>{emp.id}</span>
-                                <span style={{ 
-                                  color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  flex: 1
-                                }}>{emp.name}</span>
-                              </button>
-                            );
-                          })}
+                          {filteredAvailableEmployeesForGallery.length > 0 && (
+                            <div style={{ height: addWorkerVirtualizer.getTotalSize(), position: 'relative' }}>
+                              {addWorkerVirtualRows.map(virtualRow => {
+                                const emp = filteredAvailableEmployeesForGallery[virtualRow.index];
+                                if (!emp) return null;
+                                const isSelected = addEmployeeIds.has(emp.id);
+                                const shiftBorderColor = emp.shiftTeam === 'Green' ? '#22c55e'
+                                  : emp.shiftTeam === 'Blue' ? '#3b82f6'
+                                  : emp.shiftTeam === 'Orange' ? '#f97316'
+                                  : emp.shiftTeam === 'Yellow' ? '#eab308'
+                                  : '#e0e0e0';
+
+                                return (
+                                  <div
+                                    key={emp.id}
+                                    style={{
+                                      position: 'absolute',
+                                      top: 0,
+                                      left: 0,
+                                      width: '100%',
+                                      transform: `translateY(${virtualRow.start}px)`,
+                                      paddingBottom: 8,
+                                    }}
+                                  >
+                                    <button
+                                      onClick={() => toggleAddEmployeeSelection(emp.id)}
+                                      className='btn'
+                                      type='button'
+                                      aria-pressed={isSelected}
+                                      style={{
+                                        width: '100%',
+                                        minHeight: '40px',
+                                        padding: '8px 12px',
+                                        fontSize: '12px',
+                                        borderRadius: '10px',
+                                        border: isSelected ? '2px solid var(--accent-blue)' : `2px solid ${shiftBorderColor}`,
+                                        background: isSelected ? '#eff6ff' : 'white',
+                                        color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        gap: '12px',
+                                        transition: 'all 0.15s ease',
+                                        textAlign: 'left'
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                        <span style={{ width: '18px', textAlign: 'center', fontSize: '14px', opacity: isSelected ? 1 : 0.3 }}>✓</span>
+                                        <span style={{ fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', minWidth: '58px' }}>{emp.id}</span>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{emp.name}</span>
+                                      </div>
+                                      <span className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ flexShrink: 0 }}>
+                                        {t(`filter.${emp.shiftTeam.toLowerCase()}`)}
+                                      </span>
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                           {filteredAvailableEmployeesForGallery.length === 0 && (
                             <span style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '8px' }}>
                               {t('attendance.noMatchingWorkers')}
@@ -1693,219 +1668,32 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                         </tr>
                       ) : (
                         galleryEmployees.map(emp => {
-                          const initials = emp.name
-                            .split(' ')
-                            .filter(Boolean)
-                            .slice(0, 2)
-                            .map(part => part[0]?.toUpperCase())
-                            .join('') || emp.name.slice(0, 2).toUpperCase();
-                          const isNight = selectedShiftType === 'Night';
                           const draftKey = `${gallerySliceKey}|${emp.id}`;
-                          const draft = galleryHourDrafts[draftKey];
-                          const shiftEntry = emp.shifts[selectedDateKey];
-                          const storedRaw = isNight ? (shiftEntry?.night || '') : (shiftEntry?.day || '');
-                          const storedParsed = parseInt(String(storedRaw), 10);
-                          const storedHours = Number.isFinite(storedParsed) && storedParsed > 0 ? String(storedParsed) : '';
-                          const displayValue = draft ? draft.value : (storedHours || '12');
-
-                          const isRowSelected = selectedRowIds.has(emp.id);
-                          const userPhoto = emp.email ? userPhotos.get(emp.email) : null;
                           return (
-                            <tr 
+                            <GalleryEmployeeRow
                               key={emp.id}
-                              style={{ 
-                                background: isRowSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
-                                transition: 'background 0.15s ease'
-                              }}
-                            >
-                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                                <input
-                                  type='checkbox'
-                                  checked={isRowSelected}
-                                  onChange={() => toggleRowSelection(emp.id)}
-                                  style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                                />
-                              </td>
-                              <td style={{ color: 'var(--text-secondary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '14px', padding: '8px 12px' }}>
-                                {emp.id}
-                              </td>
-                              <td style={{ padding: '8px 12px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                  {userPhoto ? (
-                                    <img
-                                      src={userPhoto}
-                                      alt={emp.name}
-                                      style={{
-                                        width: '36px',
-                                        height: '36px',
-                                        borderRadius: '999px',
-                                        border: '1px solid var(--border-color)',
-                                        objectFit: 'cover'
-                                      }}
-                                    />
-                                  ) : (
-                                    <div
-                                      style={{
-                                        width: '36px',
-                                        height: '36px',
-                                        borderRadius: '999px',
-                                        border: '1px solid var(--border-color)',
-                                        background: 'white',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        fontSize: '13px',
-                                        fontWeight: 800,
-                                        color: 'var(--text-secondary)'
-                                      }}
-                                    >
-                                      {initials}
-                                    </div>
-                                  )}
-                                  <span style={{ fontWeight: 600, fontSize: '15px' }}>{emp.name}</span>
-                                </div>
-                              </td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
-                                {isGalleryEditMode ? (
-                                  <CustomSelect
-                                    compact
-                                    value={emp.role}
-                                    onChange={(v) => handleEmployeeUpdate(emp.id, 'role', v as Role)}
-                                    options={[
-                                      { value: 'TC.L1', label: 'TC.L1' },
-                                      { value: 'TC.L2', label: 'TC.L2' },
-                                      { value: 'TC.L3', label: 'TC.L3' },
-                                      { value: 'Hall Asist', label: 'Hall Asist' },
-                                      { value: 'Infeeder', label: 'Infeeder' },
-                                      { value: 'Sr.Infeeder', label: 'Sr.Infeeder' },
-                                      { value: 'Ops.L1', label: 'Ops.L1' },
-                                    ]}
-                                  />
-                                ) : emp.role}
-                              </td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
-                                {isGalleryEditMode ? (
-                                  <CustomSelect
-                                    compact
-                                    value={emp.indirectDirect}
-                                    onChange={(v) => handleEmployeeUpdate(emp.id, 'indirectDirect', v)}
-                                    options={[
-                                      { value: 'Direct', label: 'Direct' },
-                                      { value: 'Indirect', label: 'Indirect' },
-                                    ]}
-                                  />
-                                ) : emp.indirectDirect}
-                              </td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
-                                {isGalleryEditMode ? (
-                                  <CustomSelect
-                                    compact
-                                    value={emp.status}
-                                    onChange={(v) => handleEmployeeUpdate(emp.id, 'status', v)}
-                                    options={[
-                                      { value: 'Prod.', label: 'Prod.' },
-                                      { value: 'Jail', label: 'Jail' },
-                                      { value: 'DailyProduction', label: 'DailyProduction' },
-                                    ]}
-                                  />
-                                ) : emp.status}
-                              </td>
-                              <td style={{ padding: '8px 12px' }}>
-                                {isGalleryEditMode ? (
-                                  <CustomSelect
-                                    compact
-                                    value={emp.shiftTeam}
-                                    onChange={(v) => handleEmployeeUpdate(emp.id, 'shiftTeam', v)}
-                                    options={[
-                                      { value: 'Green', label: t('filter.green') },
-                                      { value: 'Blue', label: t('filter.blue') },
-                                      { value: 'Orange', label: t('filter.orange') },
-                                      { value: 'Yellow', label: t('filter.yellow') },
-                                    ]}
-                                  />
-                                ) : (
-                                  <span className={`badge ${getShiftClass(emp.shiftTeam)}`} style={{ fontSize: '13px', padding: '4px 10px' }}>
-                                    {emp.shiftTeam === 'Green' ? t('filter.green') : 
-                                     emp.shiftTeam === 'Blue' ? t('filter.blue') : 
-                                     emp.shiftTeam === 'Orange' ? t('filter.orange') : 
-                                     emp.shiftTeam === 'Yellow' ? t('filter.yellow') : emp.shiftTeam}
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
-                                {isGalleryEditMode ? (
-                                  <CustomSelect
-                                    compact
-                                    value={emp.gender}
-                                    onChange={(v) => handleEmployeeUpdate(emp.id, 'gender', v)}
-                                    options={[
-                                      { value: 'Male', label: 'Male' },
-                                      { value: 'Female', label: 'Female' },
-                                    ]}
-                                  />
-                                ) : emp.gender}
-                              </td>
-                              <td style={{ padding: '8px 12px' }}>
-                                <input
-                                  type='number'
-                                  min={0}
-                                  step={1}
-                                  className='input'
-                                  value={displayValue}
-                                  onChange={(e) => {
-                                    const value = e.target.value;
-                                    setGalleryHourDrafts(prev => ({
-                                      ...prev,
-                                      [draftKey]: { value, touched: true }
-                                    }));
-                                  }}
-                                  onBlur={() => {
-                                    const current = galleryHourDrafts[draftKey];
-                                    if (!current?.touched) return;
-                                    const nextValue = String(parseInt(current.value, 10) || 0);
-                                    const prevValue = String(parseInt(String(storedRaw || '0'), 10) || 0);
-                                    if (nextValue === prevValue) {
-                                      setGalleryHourDrafts(prev => ({
-                                        ...prev,
-                                        [draftKey]: { value: displayValue, touched: false }
-                                      }));
-                                      return;
-                                    }
-
-                                    // Call handleShiftChange - if validation fails, it shows alert and returns early
-                                    // The state update inside handleShiftChange will trigger re-render
-                                    handleShiftChange(emp, selectedDateKey, isNight, nextValue);
-                                    
-                                    // Clear the draft after attempting change
-                                    // If validation passed, employee state is updated and displayValue will reflect new value
-                                    // If validation failed, employee state unchanged, displayValue still shows original
-                                    setGalleryHourDrafts(prev => ({
-                                      ...prev,
-                                      [draftKey]: { value: '', touched: false }
-                                    }));
-                                  }}
-                                  style={{ width: '70px', height: '32px', fontSize: '14px' }}
-                                />
-                              </td>
-                              <td style={{ padding: '8px 12px' }}>
-                                <button
-                                  onClick={() => togglePendingLeave(emp.id)}
-                                  className='btn'
-                                  type='button'
-                                  style={{
-                                    padding: '6px 12px',
-                                    fontSize: '13px',
-                                    backgroundColor: '#fff3e0',
-                                    color: '#e65100',
-                                    border: '1px solid #ffcc80',
-                                    cursor: 'pointer',
-                                    borderRadius: '4px'
-                                  }}
-                                >
-                                  {t('adjustment.leave')}
-                                </button>
-                              </td>
-                            </tr>
+                              employee={emp}
+                              isSelected={selectedRowIds.has(emp.id)}
+                              photoUrl={emp.email ? userPhotos.get(emp.email) ?? null : null}
+                              isGalleryEditMode={isGalleryEditMode}
+                              selectedDateKey={selectedDateKey}
+                              isNight={selectedShiftType === 'Night'}
+                              draftKey={draftKey}
+                              draft={galleryHourDrafts[draftKey]}
+                              roleOptions={ROLE_OPTIONS}
+                              idStatusOptions={idStatusOptions}
+                              workStatusOptions={WORK_STATUS_OPTIONS}
+                              shiftTeamOptions={shiftTeamOptions}
+                              genderOptions={genderOptions}
+                              shiftLabel={t(`filter.${emp.shiftTeam.toLowerCase()}`)}
+                              leaveLabel={t('adjustment.leave')}
+                              onToggleRowSelection={toggleRowSelection}
+                              onEmployeeUpdate={handleEmployeeUpdate}
+                              onDraftChange={handleGalleryHourDraftChange}
+                              onDraftCommit={handleGalleryHourDraftCommit}
+                              onTogglePendingLeave={togglePendingLeave}
+                              getShiftClass={getShiftClass}
+                            />
                           );
                         })
                       )}
@@ -2042,7 +1830,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       </div>
 
       {/* Adjustment Table shows auto-generated adjustments from shift edits */}
-      <AdjustmentTable adjustments={adjustments} setAdjustments={setAdjustments} selectedShift={selectedShift} />
+      <AdjustmentTable adjustments={adjustments} setAdjustments={setAdjustments} selectedShift={selectedShift} employees={employees} />
       
       {/* Custom Alert Modal for RBP Rules */}
       {showAlertModal && (
@@ -2056,7 +1844,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          zIndex: 10000
+          zIndex: 30000
         }}>
           <div style={{
             backgroundColor: 'white',
