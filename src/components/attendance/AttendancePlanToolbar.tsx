@@ -66,7 +66,7 @@ export function AttendancePlanToolbar({
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div className='nav-tabs' aria-label='Attendance view mode'>
+        <div className='nav-tabs' aria-label={t('attendance.viewModeAria')}>
           <button
             onClick={() => onViewModeChange('pivot')}
             className={`nav-tab ${viewMode === 'pivot' ? 'active' : ''}`}
@@ -101,7 +101,7 @@ export function AttendancePlanToolbar({
           }}
         >
           <RotateCcw size={16} />
-          {t('attendance.reset') || 'Reset'}
+          {t('attendance.reset')}
         </button>
         <button
           onClick={onConfirm}
@@ -122,7 +122,7 @@ export function AttendancePlanToolbar({
           }}
         >
           <Check size={16} />
-          {t('attendance.confirm') || 'Confirm'}
+          {t('attendance.confirm')}
           {pendingChangeCount > 0 && (
             <span
               style={{

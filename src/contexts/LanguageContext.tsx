@@ -13,14 +13,25 @@ const translations: Record<Language, Record<string, string>> = {
   en: {
     // Common
     'common.refresh': 'Refresh',
+    'common.refreshData': 'Refresh data',
     'common.retry': 'Retry',
+    'common.save': 'Save',
+    'common.delete': 'Delete',
     'common.error': 'Error',
+    'common.errorLoadingData': 'Error loading data',
+    'common.dataSource': 'Data source',
+    'common.employees': 'employees',
+    'common.open': 'open',
+    'common.full': 'Full',
+    'common.sdkNotInitialized': 'Power Platform SDK is not initialized yet.',
+    'common.dataverseLoadFailed': 'Failed to load data from Dataverse',
     
     // Navbar
     'nav.attendance': 'Attendance',
     'nav.assembly': 'Assembly',
     'nav.employee': 'Employee',
     'nav.title': 'Labor Link',
+    'nav.test': 'Test',
     
     // Attendance Plan
     'attendance.title': 'Attendance Plan',
@@ -42,6 +53,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.reset': 'Reset',
     'attendance.changesSaved': 'Changes saved successfully!',
     'attendance.noChangesToSave': 'No changes to save.',
+    'attendance.saveFailed': 'Failed to save adjustments. Please try again.',
     'attendance.loading': 'Loading...',
     'attendance.refresh': 'Refresh',
     'attendance.saving': 'Saving...',
@@ -64,6 +76,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.export': 'Export',
     'attendance.addWorker': '+ Add worker',
     'attendance.searchByIdOrName': 'Search by ID or Name',
+    'attendance.selectEmployee': 'Select employee',
     'attendance.noMatchingWorkers': 'No matching workers.',
     'attendance.cancel': 'Cancel',
     'attendance.add': 'Add',
@@ -79,6 +92,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.cancelLeave': 'Recall',
     'attendance.noLeaveWorkers': 'No workers on leave.',
     'attendance.pendingConfirm': 'Pending confirmation',
+    'attendance.viewModeAria': 'Attendance view mode',
     
     // Filters
     'filter.all': 'All',
@@ -113,6 +127,20 @@ const translations: Record<Language, Record<string, string>> = {
     'adjustment.dayNight': 'Day/Night',
     'adjustment.addNotes': 'Add notes...',
     'adjustment.durationPlaceholder': 'e.g. 2h',
+
+    // Roles
+    'role.tcL1': 'TC L1',
+    'role.tcL2': 'TC L2',
+    'role.tcL3': 'TC L3',
+    'role.hallAssist': 'Hall Assist',
+    'role.infeeder': 'Infeeder',
+    'role.seniorInfeeder': 'Senior Infeeder',
+    'role.opsL1': 'Ops L1',
+
+    // Work status
+    'workStatus.production': 'Production',
+    'workStatus.jail': 'Jail',
+    'workStatus.dailyProduction': 'Daily Production',
     
     // Labor Scheduling
     'labor.title': 'Labor Scheduling',
@@ -120,6 +148,7 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.southRegion': 'South Region',
     'labor.northRegion': 'North Region',
     'labor.totalWorkforce': 'Total Workforce',
+    'labor.line': 'Line',
     'labor.needed': 'needed',
     'labor.notifyTeam': 'Notify Team',
     'labor.addLine': 'Add Line',
@@ -162,18 +191,31 @@ const translations: Record<Language, Record<string, string>> = {
     'employee.tomorrow': 'Tomorrow',
     'employee.dayAfter': 'Day After',
     'employee.closeSchedule': 'Close Schedule',
+    'employee.noEmployeeSelected': 'No employee selected',
+    'employee.commentedLinesInView': 'commented lines in view',
   },
   zh: {
     // Common
     'common.refresh': '刷新',
+    'common.refreshData': '刷新数据',
     'common.retry': '重试',
+    'common.save': '保存',
+    'common.delete': '删除',
     'common.error': '错误',
+    'common.errorLoadingData': '数据加载失败',
+    'common.dataSource': '数据来源',
+    'common.employees': '名员工',
+    'common.open': '空缺',
+    'common.full': '已满',
+    'common.sdkNotInitialized': 'Power Platform SDK 尚未初始化。',
+    'common.dataverseLoadFailed': '从 Dataverse 加载数据失败',
     
     // Navbar
     'nav.attendance': '出勤计划',
     'nav.assembly': '产线',
     'nav.employee': '刷卡',
-    'nav.title': 'test',
+    'nav.title': 'Labor Link',
+    'nav.test': '测试',
     
     // Attendance Plan
     'attendance.title': '考勤计划',
@@ -195,6 +237,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.reset': '重置',
     'attendance.changesSaved': '更改已成功保存！',
     'attendance.noChangesToSave': '没有需要保存的更改。',
+    'attendance.saveFailed': '保存调整失败，请重试。',
     'attendance.loading': '加载中...',
     'attendance.refresh': '刷新',
     'attendance.saving': '保存中...',
@@ -217,6 +260,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.export': '导出',
     'attendance.addWorker': '+ 添加员工',
     'attendance.searchByIdOrName': '按ID或姓名搜索',
+    'attendance.selectEmployee': '选择员工',
     'attendance.noMatchingWorkers': '没有匹配的员工。',
     'attendance.cancel': '取消',
     'attendance.add': '添加',
@@ -232,6 +276,7 @@ const translations: Record<Language, Record<string, string>> = {
     'attendance.cancelLeave': '召回',
     'attendance.noLeaveWorkers': '暂无请假人员',
     'attendance.pendingConfirm': '待确认',
+    'attendance.viewModeAria': '出勤视图模式',
     
     // Filters
     'filter.all': '全部',
@@ -266,6 +311,20 @@ const translations: Record<Language, Record<string, string>> = {
     'adjustment.dayNight': '白班/夜班',
     'adjustment.addNotes': '添加备注...',
     'adjustment.durationPlaceholder': '例如 2小时',
+
+    // Roles
+    'role.tcL1': '组长 L1',
+    'role.tcL2': '组长 L2',
+    'role.tcL3': '组长 L3',
+    'role.hallAssist': '大厅协助',
+    'role.infeeder': '上料员',
+    'role.seniorInfeeder': '高级上料员',
+    'role.opsL1': '操作员 L1',
+
+    // Work status
+    'workStatus.production': '生产',
+    'workStatus.jail': '待岗',
+    'workStatus.dailyProduction': '日常生产',
     
     // Labor Scheduling
     'labor.title': '劳动力调度',
@@ -273,6 +332,7 @@ const translations: Record<Language, Record<string, string>> = {
     'labor.southRegion': '南部区域',
     'labor.northRegion': '北部区域',
     'labor.totalWorkforce': '总劳动力',
+    'labor.line': '产线',
     'labor.needed': '需要',
     'labor.notifyTeam': '通知团队',
     'labor.addLine': '添加产线',
@@ -315,6 +375,8 @@ const translations: Record<Language, Record<string, string>> = {
     'employee.tomorrow': '明天',
     'employee.dayAfter': '后天',
     'employee.closeSchedule': '关闭排班',
+    'employee.noEmployeeSelected': '未选择员工',
+    'employee.commentedLinesInView': '条产线有备注',
   },
 };
 

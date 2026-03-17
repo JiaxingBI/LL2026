@@ -10,7 +10,7 @@ interface AddWorkerModalProps {
   subtitle?: string;
   employees: Employee[];
   selectedIds: Set<string>;
-  selectedLabel: string;
+  selectionSummaryLabel: (count: number) => string;
   searchPlaceholder: string;
   emptyTitle: string;
   emptyDescription?: string;
@@ -18,6 +18,7 @@ interface AddWorkerModalProps {
   confirmLabel: (count: number) => string;
   closeLabel: string;
   teamLabel: (team: 'All' | ShiftTeam) => string;
+  employeeMetaLabel: (employee: Employee) => string;
   onToggleSelect: (employeeId: string) => void;
   onClose: () => void;
   onConfirm: () => void;
@@ -53,7 +54,7 @@ export default function AddWorkerModal({
   subtitle,
   employees,
   selectedIds,
-  selectedLabel,
+  selectionSummaryLabel,
   searchPlaceholder,
   emptyTitle,
   emptyDescription,
@@ -61,6 +62,7 @@ export default function AddWorkerModal({
   confirmLabel,
   closeLabel,
   teamLabel,
+  employeeMetaLabel,
   onToggleSelect,
   onClose,
   onConfirm,
@@ -170,8 +172,7 @@ export default function AddWorkerModal({
                   color: 'var(--text-secondary)',
                 }}
               >
-                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{selectedIds.size}</span>
-                <span>{selectedLabel}</span>
+                <span>{selectionSummaryLabel(selectedIds.size)}</span>
               </div>
             </div>
 
@@ -316,7 +317,7 @@ export default function AddWorkerModal({
                                 </span>
                                 <span style={{ width: 4, height: 4, borderRadius: 999, background: '#cbd5e1' }} />
                                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                                  {employee.role} · {employee.indirectDirect}
+                                  {employeeMetaLabel(employee)}
                                 </span>
                               </div>
                             </div>
@@ -358,7 +359,7 @@ export default function AddWorkerModal({
           }}
         >
           <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-            <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{selectedIds.size}</span> {selectedLabel.toLowerCase()}
+            {selectionSummaryLabel(selectedIds.size)}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button type="button" className="btn btn-secondary" onClick={onClose}>

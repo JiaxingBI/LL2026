@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Users, Plus, X, MessageCircle, RefreshCw, CalendarDays, UserCheck, ClipboardList } from 'lucide-react';
+import { Users, Plus, X, MessageCircle, RefreshCw, UserCheck, ClipboardList } from 'lucide-react';
 import { useDataverseEmployees } from '../hooks/useDataverseEmployees';
 import type { AssemblyLine } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -9,8 +9,8 @@ import { CardSkeleton } from './ui/Skeleton';
 import CustomSelect from './ui/CustomSelect';
 import { renderShiftSelectOption, renderShiftSelectValue } from '../utils/shiftSelectRenderers';
 import AddWorkerModal from './ui/AddWorkerModal';
-import PageHero from './ui/PageHero';
 import { buildPendingLeaveKey, mergeEmployeesWithLocal, readPersistedAttendancePlanState } from '../utils/attendancePlanPersistence';
+import { getAssemblyLineDisplayName, getEmployeeMetaLabel, translateKnownErrorMessage } from '../utils/displayLabels';
 
 // Default assembly lines — shared with EmployeeView
 const defaultAssemblyLines: AssemblyLine[] = DEFAULT_ASSEMBLY_LINES;
@@ -371,88 +371,71 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', padding: '24px' }}>
-        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.error') || 'Error loading data'}</div>
-        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{error}</p>
+        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.errorLoadingData')}</div>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{translateKnownErrorMessage(error, t)}</p>
         <button
           onClick={() => window.location.reload()}
           style={{ padding: '8px 16px', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
         >
-          {t('common.retry') || 'Retry'}
+          {t('common.retry')}
         </button>
       </div>
     );
   }
 
   return (
-    <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', height: '100%' }}>
-      {/* Header */}
-      <PageHero
-        title={t('labor.title')}
-        subtitle={t('labor.subtitle')}
-        aside={(
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 16, background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(210,210,215,0.8)' }}>
-            <CalendarDays size={18} color="var(--accent-blue)" />
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('labor.selectDateShift')}</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-                {shiftOptions.find(option => option.value === selectedShift)?.label ?? t('labor.selectDate')}
-              </div>
-            </div>
-          </div>
-        )}
-      />
-
+    <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', height: '100%' }}>
       {/* KPI Cards */}
-      <div className="grid grid-cols-3" style={{ gap: 14 }}>
-        <div className="card" style={{ padding: '20px', position: 'relative' }}>
+      <div className="grid grid-cols-3" style={{ gap: 10 }}>
+        <div className="card" style={{ padding: '14px 16px', position: 'relative' }}>
           <div className="flex justify-between" style={{ alignItems: 'flex-start' }}>
             <div>
-              <p style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text-secondary)', margin: 0 }}>{t('labor.availableWorkers')}</p>
-              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                <span style={{ fontSize: '30px', fontWeight: 'bold' }}>{assignableEmployees.length}</span>
-                <span style={{ fontSize: '14px', color: '#999' }}>/ {availableEmployees.length}</span>
+              <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', margin: 0 }}>{t('labor.availableWorkers')}</p>
+              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span style={{ fontSize: '24px', fontWeight: 'bold', lineHeight: 1 }}>{assignableEmployees.length}</span>
+                <span style={{ fontSize: '12px', color: '#999' }}>/ {availableEmployees.length}</span>
               </div>
-              <p style={{ fontSize: '12px', fontWeight: '500', color: assignableEmployees.length > 0 ? 'var(--success)' : 'var(--warning)', marginTop: '4px' }}>
+              <p style={{ fontSize: '11px', fontWeight: '500', color: assignableEmployees.length > 0 ? 'var(--success)' : 'var(--warning)', marginTop: '3px', marginBottom: 0 }}>
                 • {Math.max(availableEmployees.length - assignableEmployees.length, 0)} {t('labor.assignedWorkers')}
               </p>
             </div>
-            <div style={{ padding: '8px', background: '#eff6ff', borderRadius: '8px' }}>
-              <Users size={20} color="var(--accent-blue)" />
+            <div style={{ padding: '6px', background: '#eff6ff', borderRadius: '8px' }}>
+              <Users size={16} color="var(--accent-blue)" />
             </div>
           </div>
         </div>
 
-        <div className="card" style={{ padding: '20px', position: 'relative' }}>
+        <div className="card" style={{ padding: '14px 16px', position: 'relative' }}>
           <div className="flex justify-between" style={{ alignItems: 'flex-start' }}>
             <div>
-              <p style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text-secondary)', margin: 0 }}>{t('labor.assignedWorkers')}</p>
-              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                <span style={{ fontSize: '30px', fontWeight: 'bold' }}>{totalAssignedWorkers}</span>
-                <span style={{ fontSize: '14px', color: '#999' }}>/ {totalCapacity}</span>
+              <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', margin: 0 }}>{t('labor.assignedWorkers')}</p>
+              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span style={{ fontSize: '24px', fontWeight: 'bold', lineHeight: 1 }}>{totalAssignedWorkers}</span>
+                <span style={{ fontSize: '12px', color: '#999' }}>/ {totalCapacity}</span>
               </div>
-              <p style={{ fontSize: '12px', fontWeight: '500', color: totalAssignedWorkers >= totalCapacity ? 'var(--success)' : 'var(--warning)', marginTop: '4px' }}>
+              <p style={{ fontSize: '11px', fontWeight: '500', color: totalAssignedWorkers >= totalCapacity ? 'var(--success)' : 'var(--warning)', marginTop: '3px', marginBottom: 0 }}>
                 • {totalOpenSlots} {t('labor.openSlots')}
               </p>
             </div>
-            <div style={{ padding: '8px', background: '#eefbf3', borderRadius: '8px' }}>
-              <UserCheck size={20} color="var(--success)" />
+            <div style={{ padding: '6px', background: '#eefbf3', borderRadius: '8px' }}>
+              <UserCheck size={16} color="var(--success)" />
             </div>
           </div>
         </div>
 
-        <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div className="flex justify-between" style={{ alignItems: 'flex-start' }}>
             <div>
-              <p style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text-secondary)', margin: 0 }}>{t('labor.openSlots')}</p>
-              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                <span style={{ fontSize: '30px', fontWeight: 'bold' }}>{totalOpenSlots}</span>
-                <span style={{ fontSize: '14px', color: '#999' }}>/ {totalCapacity}</span>
+              <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', margin: 0 }}>{t('labor.openSlots')}</p>
+              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span style={{ fontSize: '24px', fontWeight: 'bold', lineHeight: 1 }}>{totalOpenSlots}</span>
+                <span style={{ fontSize: '12px', color: '#999' }}>/ {totalCapacity}</span>
               </div>
             </div>
-            <ClipboardList size={16} color="#d1d5db" />
+            <ClipboardList size={14} color="#d1d5db" />
           </div>
-          <div style={{ width: '100%', background: '#f3f4f6', borderRadius: '999px', height: '6px', marginTop: '16px' }}>
-            <div style={{ background: 'var(--accent-blue)', height: '6px', borderRadius: '999px', width: `${totalCapacity === 0 ? 0 : ((totalCapacity - totalOpenSlots) / totalCapacity) * 100}%` }}></div>
+          <div style={{ width: '100%', background: '#f3f4f6', borderRadius: '999px', height: '5px', marginTop: '12px' }}>
+            <div style={{ background: 'var(--accent-blue)', height: '5px', borderRadius: '999px', width: `${totalCapacity === 0 ? 0 : ((totalCapacity - totalOpenSlots) / totalCapacity) * 100}%` }}></div>
           </div>
         </div>
       </div>
@@ -481,10 +464,10 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
             cursor: isLoading ? 'not-allowed' : 'pointer',
             opacity: isLoading ? 0.6 : 1
           }}
-          title={t('common.refresh') || 'Refresh data'}
+          title={t('common.refreshData')}
         >
           <RefreshCw size={16} className={isLoading ? 'spin' : ''} />
-          {t('common.refresh') || 'Refresh'}
+          {t('common.refresh')}
         </button>
       </div>
 
@@ -522,11 +505,11 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <h3 style={{ fontWeight: 'bold', fontSize: '15px', margin: 0, lineHeight: '1.3', color: '#1f2937' }}>{line.id}</h3>
                   <span style={{ padding: '3px 8px', borderRadius: 999, background: 'rgba(219, 234, 254, 0.8)', color: '#1d4ed8', fontSize: 11, fontWeight: 700 }}>
-                    {line.capacity - line.currentWorkers > 0 ? `${line.capacity - line.currentWorkers} open` : 'Full'}
+                    {line.capacity - line.currentWorkers > 0 ? `${line.capacity - line.currentWorkers} ${t('common.open')}` : t('common.full')}
                   </span>
                 </div>
                 <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0 0', lineHeight: '1.4' }}>
-                  {line.name.replace(`${line.id}-`, '').replace(`${line.id} - `, '')}
+                  {getAssemblyLineDisplayName(line.id, line.name, t)}
                 </p>
               </div>
               <div 
@@ -652,13 +635,14 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
         subtitle={selectedShiftInfo ? `${selectedLine?.name ?? ''} • ${shiftOptions.find(option => option.value === selectedShift)?.label ?? ''}` : undefined}
         employees={assignableEmployees}
         selectedIds={selectedEmployeeIds}
-        selectedLabel={t('attendance.selected')}
+        selectionSummaryLabel={(count) => `${count} ${t('attendance.selected')}`}
         searchPlaceholder={t('attendance.searchByIdOrName')}
-        emptyTitle={assignableEmployees.length === 0 ? (t('labor.allAssigned') || 'All available workers are already assigned') : t('attendance.noMatchingWorkers')}
-        emptyDescription={t('labor.availableWorkersHint') || 'Availability is synced from Attendance Plan for the selected date and shift.'}
+        emptyTitle={assignableEmployees.length === 0 ? t('labor.allAssigned') : t('attendance.noMatchingWorkers')}
+        emptyDescription={t('labor.availableWorkersHint')}
         availableLabel={(count) => `${count} ${t('labor.availableWorkers').toLowerCase()}`}
-        confirmLabel={(count) => `${t('labor.assignSelected') || 'Assign selected'} (${count})`}
+        confirmLabel={(count) => `${t('labor.assignSelected')} (${count})`}
         closeLabel={t('attendance.close')}
+        employeeMetaLabel={(employee) => getEmployeeMetaLabel(employee, t)}
         teamLabel={(team) => team === 'All' ? t('filter.all') : t(`filter.${team.toLowerCase()}`)}
         onToggleSelect={toggleSelectedEmployee}
         onClose={() => {
@@ -688,14 +672,14 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
         >
           {commentPopover.mode === 'preview' ? (
             <div style={{ fontSize: 12, lineHeight: 1.5 }}>
-              {lines.find(line => line.id === commentPopover.lineId)?.comment || (t('labor.commentEmpty') || 'No comment yet. Click to add context for this line.')}
+              {lines.find(line => line.id === commentPopover.lineId)?.comment || t('labor.commentEmpty')}
             </div>
           ) : (
             <div>
               <textarea
                 value={editingComment}
                 onChange={(event) => setEditingComment(event.target.value)}
-                placeholder={t('labor.commentPlaceholder') || 'Add a handoff note, staffing risk, or assembly instruction...'}
+                placeholder={t('labor.commentPlaceholder')}
                 autoFocus
                 style={{
                   width: '100%',
@@ -729,7 +713,7 @@ export default function LaborScheduling({ isInitialized = true }: LaborSchedulin
                   className="btn btn-primary"
                   style={{ padding: '6px 12px', fontSize: 12 }}
                 >
-                  {t('adjustment.edit')}
+                  {t('common.save')}
                 </button>
               </div>
             </div>

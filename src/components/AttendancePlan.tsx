@@ -10,13 +10,24 @@ import { validateShiftChange } from '../utils/attendanceValidation';
 import { useUserPhotos } from '../hooks/useUserPhotos';
 import { showToast } from './ui/Toast';
 import { TableRowSkeleton } from './ui/Skeleton';
-import { AttendancePlanHeader } from './attendance/AttendancePlanHeader';
 import { AttendancePlanToolbar } from './attendance/AttendancePlanToolbar';
 import { GallerySummaryBar } from './attendance/GallerySummaryBar';
 import { VirtualPivotTable } from './attendance/VirtualPivotTable';
 import { GalleryEmployeeRow } from './attendance/GalleryEmployeeRow';
 import AddWorkerModal from './ui/AddWorkerModal';
-import { GENDER_OPTIONS, getShiftClass, ID_STATUS_OPTIONS, ROLE_OPTIONS, SHIFT_TEAM_VALUES, WORK_STATUS_OPTIONS } from '../constants/attendanceOptions';
+import { getShiftClass } from '../constants/attendanceOptions';
+import {
+  buildGenderOptions,
+  buildIdStatusOptions,
+  buildRoleOptions,
+  buildShiftTeamOptions,
+  buildWorkStatusOptions,
+  getGenderLabel,
+  getIndirectDirectLabel,
+  getRoleLabel,
+  getWorkStatusLabel,
+  translateKnownErrorMessage,
+} from '../utils/displayLabels';
 import {
   buildPendingLeaveKey,
   mergeEmployeesWithLocal,
@@ -202,7 +213,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   // Fetch data from Dataverse when SDK is initialized (or immediately for mock data)
   useEffect(() => {
     if (!USE_MOCK_DATA && !isInitialized) {
-      setLoadError('Power Platform SDK is not initialized yet.');
+      setLoadError('common.sdkNotInitialized');
       setIsLoading(false);
       return;
     }
@@ -257,7 +268,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
         });
       } catch (error) {
         console.error('Failed to load Dataverse data:', error);
-        setLoadError(error instanceof Error ? error.message : 'Failed to load data from Dataverse');
+        setLoadError(error instanceof Error ? error.message : 'common.dataverseLoadFailed');
       } finally {
         setIsLoading(false);
       }
@@ -357,7 +368,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
       setGalleryHourDrafts({});
       setSelectedRowIds(new Set());
       setHasChanges(false);
-      showToast(t('attendance.changesSaved') || 'Changes saved successfully!', 'success');
+      showToast(t('attendance.changesSaved'), 'success');
       return;
     }
 
@@ -390,10 +401,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     if (failedCount > 0) {
       console.error(`Failed to save ${failedCount} adjustment(s) to Dataverse`);
       setHasChanges(true);
-      showToast(
-        t('attendance.saveFailed') || `Failed to save ${failedCount} adjustment(s). Please try again.`,
-        'error',
-      );
+      showToast(`${t('attendance.saveFailed')} (${failedCount})`, 'error');
       return;
     }
 
@@ -402,7 +410,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
     setGalleryHourDrafts({});
     setSelectedRowIds(new Set());
     setHasChanges(false);
-    showToast(t('attendance.changesSaved') || 'Changes saved successfully!', 'success');
+    showToast(t('attendance.changesSaved'), 'success');
   }, [adjustments, employees, pendingLeaveIds, t]);
 
   /**
@@ -727,9 +735,11 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   // Fetch user photos from Office365 for gallery employees
   const galleryEmails = useMemo(() => galleryEmployees.map(emp => emp.email || '').filter(Boolean), [galleryEmployees]);
   const { photos: userPhotos } = useUserPhotos(galleryEmails);
-  const idStatusOptions = useMemo(() => ID_STATUS_OPTIONS.map(option => ({ value: option.value, label: t(option.translationKey) })), [t]);
-  const shiftTeamOptions = useMemo(() => SHIFT_TEAM_VALUES.map(team => ({ value: team, label: t(`filter.${team.toLowerCase()}`) })), [t]);
-  const genderOptions = useMemo(() => GENDER_OPTIONS.map(option => ({ value: option.value, label: t(option.translationKey) })), [t]);
+  const roleOptions = useMemo(() => buildRoleOptions(t), [t]);
+  const idStatusOptions = useMemo(() => buildIdStatusOptions(t), [t]);
+  const workStatusOptions = useMemo(() => buildWorkStatusOptions(t), [t]);
+  const shiftTeamOptions = useMemo(() => buildShiftTeamOptions(t), [t]);
+  const genderOptions = useMemo(() => buildGenderOptions(t), [t]);
 
   const availableEmployeesForGallery = useMemo(() => {
     // Per spec: choose from whole list not currently in this gallery slice
@@ -1024,14 +1034,14 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   if (loadError) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', padding: '24px' }}>
-        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.error') || 'Error loading data'}</div>
-        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{loadError}</p>
+        <div style={{ color: '#d32f2f', fontSize: '18px', fontWeight: 500 }}>⚠️ {t('common.errorLoadingData')}</div>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '400px' }}>{translateKnownErrorMessage(loadError, t)}</p>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button
             onClick={() => window.location.reload()}
             style={{ padding: '8px 16px', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
           >
-            {t('common.retry') || 'Retry'}
+            {t('common.retry')}
           </button>
         </div>
       </div>
@@ -1041,12 +1051,6 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
   return (
     // Layout: header + toolbar + table + adjustment panel
     <div className='container' style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', height: '100%', minHeight: 0 }}>
-      <AttendancePlanHeader
-        title={t('attendance.title')}
-        subtitle={t('attendance.subtitle')}
-        statusText={`☁️ Dataverse (${dataverseData?.employees.length ?? 0} employees)`}
-      />
-
       {/* Schedule Editor */}
       <div className='card' style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <AttendancePlanToolbar
@@ -1291,7 +1295,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                         color: 'var(--accent-blue)',
                         fontWeight: 600
                       }}>
-                        {selectedRowIds.size} selected
+                        {selectedRowIds.size} {t('attendance.selected')}
                       </span>
                     )}
                   </div>
@@ -1310,7 +1314,7 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                           border: '1px solid rgba(255, 59, 48, 0.3)'
                         }}
                       >
-                        🗑 Delete ({selectedRowIds.size})
+                        🗑 {t('common.delete')} ({selectedRowIds.size})
                       </button>
                     )}
                     <button
@@ -1348,13 +1352,14 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                   subtitle={`${selectedDateKey} • ${selectedShiftType === 'Day' ? t('attendance.day') : t('attendance.night')}`}
                   employees={availableEmployeesForGallery}
                   selectedIds={addEmployeeIds}
-                  selectedLabel={t('attendance.selected')}
+                  selectionSummaryLabel={(count) => `${count} ${t('attendance.selected')}`}
                   searchPlaceholder={t('attendance.searchByIdOrName')}
                   emptyTitle={t('attendance.noMatchingWorkers')}
                   emptyDescription={t('attendance.noEmployeesInSlice')}
-                  availableLabel={(count) => `${count} available`}
+                  availableLabel={(count) => `${count} ${t('labor.availableWorkers')}`}
                   confirmLabel={(count) => `${t('attendance.addSelected')} (${count})`}
                   closeLabel={t('attendance.close')}
+                  employeeMetaLabel={(employee) => `${getRoleLabel(employee.role, t)} · ${getIndirectDirectLabel(employee.indirectDirect, t)}`}
                   teamLabel={(team) => team === 'All' ? t('filter.all') : t(`filter.${team.toLowerCase()}`)}
                   onToggleSelect={toggleAddEmployeeSelection}
                   onClose={closeAddWorkerModal}
@@ -1406,12 +1411,16 @@ export default function AttendancePlan({ isInitialized = false }: AttendancePlan
                               isNight={selectedShiftType === 'Night'}
                               draftKey={draftKey}
                               draft={galleryHourDrafts[draftKey]}
-                              roleOptions={ROLE_OPTIONS}
+                              roleOptions={roleOptions}
                               idStatusOptions={idStatusOptions}
-                              workStatusOptions={WORK_STATUS_OPTIONS}
+                              workStatusOptions={workStatusOptions}
                               shiftTeamOptions={shiftTeamOptions}
                               genderOptions={genderOptions}
                               shiftLabel={t(`filter.${emp.shiftTeam.toLowerCase()}`)}
+                              roleLabel={getRoleLabel(emp.role, t)}
+                              idStatusLabel={getIndirectDirectLabel(emp.indirectDirect, t)}
+                              workStatusLabel={getWorkStatusLabel(emp.status, t)}
+                              genderLabel={getGenderLabel(emp.gender, t)}
                               leaveLabel={t('adjustment.leave')}
                               onToggleRowSelection={toggleRowSelection}
                               onEmployeeUpdate={handleEmployeeUpdate}

@@ -23,6 +23,10 @@ interface GalleryEmployeeRowProps {
   shiftTeamOptions: SelectOption[];
   genderOptions: SelectOption[];
   shiftLabel: string;
+  roleLabel: string;
+  idStatusLabel: string;
+  workStatusLabel: string;
+  genderLabel: string;
   leaveLabel: string;
   onToggleRowSelection: (employeeId: string) => void;
   onEmployeeUpdate: (employeeId: string, field: keyof Employee, value: string) => void;
@@ -47,6 +51,10 @@ function GalleryEmployeeRowComponent({
   shiftTeamOptions,
   genderOptions,
   shiftLabel,
+  roleLabel,
+  idStatusLabel,
+  workStatusLabel,
+  genderLabel,
   leaveLabel,
   onToggleRowSelection,
   onEmployeeUpdate,
@@ -130,7 +138,7 @@ function GalleryEmployeeRowComponent({
             onChange={(value) => onEmployeeUpdate(employee.id, 'role', value as Role)}
             options={roleOptions}
           />
-        ) : employee.role}
+        ) : roleLabel}
       </td>
       <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
         {isGalleryEditMode ? (
@@ -140,7 +148,7 @@ function GalleryEmployeeRowComponent({
             onChange={(value) => onEmployeeUpdate(employee.id, 'indirectDirect', value)}
             options={idStatusOptions}
           />
-        ) : employee.indirectDirect}
+        ) : idStatusLabel}
       </td>
       <td style={{ color: 'var(--text-secondary)', fontSize: '14px', padding: '8px 12px' }}>
         {isGalleryEditMode ? (
@@ -150,7 +158,7 @@ function GalleryEmployeeRowComponent({
             onChange={(value) => onEmployeeUpdate(employee.id, 'status', value as WorkStatus)}
             options={workStatusOptions}
           />
-        ) : employee.status}
+        ) : workStatusLabel}
       </td>
       <td style={{ padding: '8px 12px' }}>
         {isGalleryEditMode ? (
@@ -174,7 +182,7 @@ function GalleryEmployeeRowComponent({
             onChange={(value) => onEmployeeUpdate(employee.id, 'gender', value)}
             options={genderOptions}
           />
-        ) : employee.gender}
+        ) : genderLabel}
       </td>
       <td style={{ padding: '8px 12px' }}>
         <input

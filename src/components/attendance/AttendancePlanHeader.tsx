@@ -1,3 +1,4 @@
+import { useLanguage } from '../../contexts/LanguageContext';
 import PageHero from '../ui/PageHero';
 
 interface AttendancePlanHeaderProps {
@@ -7,6 +8,8 @@ interface AttendancePlanHeaderProps {
 }
 
 export function AttendancePlanHeader({ title, subtitle, statusText }: AttendancePlanHeaderProps) {
+  const { t } = useLanguage();
+
   return (
     <PageHero
       title={title}
@@ -24,7 +27,7 @@ export function AttendancePlanHeader({ title, subtitle, statusText }: Attendance
           }}
         >
           <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Data source</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('common.dataSource')}</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{statusText}</div>
           </div>
         </div>

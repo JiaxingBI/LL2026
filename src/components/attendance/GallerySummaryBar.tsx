@@ -27,10 +27,82 @@ function SummaryCard({
   caption?: string;
 }) {
   return (
-    <div className='card' style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
-      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: '26px', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-0.02em' }}>{value}</span>
-      {caption ? <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{caption}</span> : null}
+    <div
+      className='card'
+      style={{
+        padding: '10px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '3px',
+        minWidth: 0,
+        justifyContent: 'center',
+      }}
+    >
+      <span
+        style={{
+          fontSize: '10px',
+          color: 'var(--text-secondary)',
+          fontWeight: 700,
+          lineHeight: 1.2,
+          textTransform: 'uppercase',
+          letterSpacing: '0.03em',
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ fontSize: '16px', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-0.02em', lineHeight: 1.05 }}>{value}</span>
+      {caption ? (
+        <span
+          style={{
+            fontSize: '10px',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.2,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={caption}
+        >
+          {caption}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function DetailStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        padding: '8px 10px',
+        borderRadius: 12,
+        background: 'linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%)',
+        border: '1px solid rgba(210, 220, 235, 0.85)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+      }}
+    >
+      <span
+        style={{
+          fontSize: '10px',
+          color: 'var(--text-secondary)',
+          fontWeight: 700,
+          lineHeight: 1.2,
+          textTransform: 'uppercase',
+          letterSpacing: '0.03em',
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.05 }}>{value}</span>
     </div>
   );
 }
@@ -52,12 +124,12 @@ export function GallerySummaryBar({
   t,
 }: GallerySummaryBarProps) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 8,
         }}
       >
         <SummaryCard label={t('attendance.totalWorkers')} value={employeesCount} caption='Loaded in current plan' />
@@ -67,18 +139,31 @@ export function GallerySummaryBar({
         {extraCards}
       </div>
 
-      <div className='card' style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: 4 }}>
+      <div className='card' style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
               {t('attendance.lastColorShift')}
             </div>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>{lastSliceLabel}</div>
+            <div
+              style={{
+                fontSize: '15px',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                lineHeight: 1.1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={lastSliceLabel}
+            >
+              {lastSliceLabel}
+            </div>
           </div>
           <span
             style={{
-              fontSize: '12px',
-              padding: '6px 12px',
+              fontSize: '10px',
+              padding: '4px 8px',
               borderRadius: '999px',
               border: '1px solid #dbeafe',
               background: '#eff6ff',
@@ -94,14 +179,14 @@ export function GallerySummaryBar({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 12,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))',
+            gap: 8,
           }}
         >
-          <SummaryCard label={t('attendance.actualArrivedPlanInternal')} value={`${lastSliceInternalArrived}/${lastSliceInternalPlan}`} />
-          <SummaryCard label={t('attendance.actualArrivedPlanThirdParty')} value={`${lastSliceThirdPartyArrived}/${lastSliceThirdPartyPlan}`} />
-          <SummaryCard label={t('attendance.overtimeWorkers')} value={lastSliceOvertimeCount} />
-          <SummaryCard label={t('attendance.leaveWorkers')} value={lastSliceLeaveCount} />
+          <DetailStat label={t('attendance.actualArrivedPlanInternal')} value={`${lastSliceInternalArrived}/${lastSliceInternalPlan}`} />
+          <DetailStat label={t('attendance.actualArrivedPlanThirdParty')} value={`${lastSliceThirdPartyArrived}/${lastSliceThirdPartyPlan}`} />
+          <DetailStat label={t('attendance.overtimeWorkers')} value={lastSliceOvertimeCount} />
+          <DetailStat label={t('attendance.leaveWorkers')} value={lastSliceLeaveCount} />
         </div>
       </div>
     </div>

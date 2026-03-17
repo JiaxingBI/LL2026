@@ -4,7 +4,7 @@ import type { Adjustment, Employee, Role, ShiftTeam, WorkStatus } from '../types
 import { useLanguage } from '../contexts/LanguageContext';
 import CustomDatePicker from './ui/CustomDatePicker';
 import CustomSelect from './ui/CustomSelect';
-import { ROLE_OPTIONS, SHIFT_TEAM_VALUES, WORK_STATUS_OPTIONS } from '../constants/attendanceOptions';
+import { buildRoleOptions, buildShiftTeamOptions, buildWorkStatusOptions } from '../utils/displayLabels';
 
 interface AdjustmentTableProps {
   adjustments: Adjustment[];
@@ -23,6 +23,9 @@ function createLocalAdjustmentId(): string {
 export default function AdjustmentTable({ adjustments, setAdjustments, selectedShift, employees }: AdjustmentTableProps) {
   const { t } = useLanguage();
   const [isExpanded, setIsExpanded] = useState(false);
+  const roleOptions = useMemo(() => buildRoleOptions(t), [t]);
+  const workStatusOptions = useMemo(() => buildWorkStatusOptions(t), [t]);
+  const shiftTeamOptions = useMemo(() => buildShiftTeamOptions(t), [t]);
   const employeeOptions = useMemo(
     () => employees.map(employee => ({ value: employee.id, label: `${employee.id} · ${employee.name}` })),
     [employees],
@@ -144,13 +147,13 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                         compact
                         value={adj.employeeId}
                         onChange={(value) => handleEmployeeChange(adj.id, value)}
-                        options={[{ value: '', label: t('attendance.selectEmployee') || 'Select employee' }, ...employeeOptions]}
+                        options={[{ value: '', label: t('attendance.selectEmployee') }, ...employeeOptions]}
                         minWidth={220}
                       />
                     </td>
                     <td style={{ fontWeight: '500', position: 'sticky', left: '40px', background: 'white', zIndex: 1, width: '80px', minWidth: '80px' }}>
                       <span style={{ display: 'inline-block', minWidth: '100%', color: adj.name ? 'inherit' : '#999' }}>
-                        {adj.name || (t('attendance.selectEmployee') || 'Select employee')}
+                        {adj.name || t('attendance.selectEmployee')}
                       </span>
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '120px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
@@ -158,7 +161,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                         compact
                         value={adj.role || 'Ops.L1'}
                         onChange={(v) => updateAdjustment(adj.id, 'role', v as Role)}
-                        options={ROLE_OPTIONS}
+                        options={roleOptions}
                       />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '190px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
@@ -177,7 +180,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                         compact
                         value={adj.workStatus || 'Prod.'}
                         onChange={(v) => updateAdjustment(adj.id, 'workStatus', v as WorkStatus)}
-                        options={WORK_STATUS_OPTIONS}
+                        options={workStatusOptions}
                       />
                     </td>
                     <td style={{ position: 'sticky', left: '330px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px' }}>
@@ -185,7 +188,7 @@ export default function AdjustmentTable({ adjustments, setAdjustments, selectedS
                         compact
                         value={adj.shiftTeam || 'Green'}
                         onChange={(v) => updateAdjustment(adj.id, 'shiftTeam', v as ShiftTeam)}
-                        options={SHIFT_TEAM_VALUES.map(team => ({ value: team, label: t(`filter.${team.toLowerCase()}`) }))}
+                        options={shiftTeamOptions}
                       />
                     </td>
                     <td style={{ color: '#666', position: 'sticky', left: '400px', background: 'white', zIndex: 1, width: '70px', minWidth: '70px', boxShadow: '2px 0 5px rgba(0,0,0,0.1)' }}>

@@ -173,80 +173,73 @@ function generateShiftGroups(): Jia_ll_dshiftgroups[] {
   return groups;
 }
 
-// ── Shift Plans (2-team rotation) ────────────────────────────────────────
+// ── Shift Plans (4-on / 4-off rotation) ───────────────────────────────────
 //
-// Rotation logic (realistic 12-hour factory pattern):
-//   Period 1 (4 days): Green Day + Orange Night
-//   Period 2 (4 days): Orange Day + Green Night
-//   Period 3 (4 days): Yellow Day + Blue Night
-//   Period 4 (4 days): Blue Day + Yellow Night
-//   ...then repeats (16-day cycle)
+// Rotation rule:
+//   Each team follows an 8-day cycle: Day, Day, Night, Night, Rest, Rest, Rest, Rest
 //
-// This means on any given day, exactly 2 of the 4 teams are working.
+// Team staggering:
+//   Green  = offset 0  -> DDNNRRRR
+//   Orange = offset 2  -> NNRRRRDD
+//   Yellow = offset 4  -> RRRRDDNN
+//   Blue   = offset 6  -> RRDDNNRR
+//
+// This guarantees each team works exactly 2 day shifts and 2 night shifts,
+// then rests for the next 4 days before repeating.
+
+const TEAM_ROTATION_OFFSETS: Record<string, number> = {
+  Green: 0,
+  Orange: 2,
+  Yellow: 4,
+  Blue: 6,
+};
+
+const ROTATION_STATES = ['Day', 'Day', 'Night', 'Night', 'Rest', 'Rest', 'Rest', 'Rest'] as const;
+
+function getTeamShiftForDay(team: string, dayOfYear: number): 'Day' | 'Night' | 'Rest' {
+  const offset = TEAM_ROTATION_OFFSETS[team] ?? 0;
+  const cycleIndex = (dayOfYear + offset) % ROTATION_STATES.length;
+  return ROTATION_STATES[cycleIndex];
+}
 
 function generateShiftPlans(): Jia_ll_dshiftplans[] {
   const plans: Jia_ll_dshiftplans[] = [];
   const year = 2026;
 
-  // Rotation schedule: [dayTeam, nightTeam] per period
-  const rotation: [string, string][] = [
-    ['Green', 'Orange'],
-    ['Orange', 'Green'],
-    ['Yellow', 'Blue'],
-    ['Blue', 'Yellow'],
-  ];
-
   // Generate plans for the full year
   for (let month = 1; month <= 12; month++) {
     const daysInMonth = new Date(year, month, 0).getDate();
     for (let day = 1; day <= daysInMonth; day++) {
-      // Day of year for rotation calculation
+      // Day-of-year index used to place each team in its 8-day DDNNRRRR cycle.
       const dt = new Date(year, month - 1, day);
       const dayOfYear = Math.floor((dt.getTime() - new Date(year, 0, 1).getTime()) / 86400000);
-      const periodIndex = Math.floor(dayOfYear / 4) % rotation.length;
-      const [dayTeam, nightTeam] = rotation[periodIndex];
-
       const dateStr = isoDate(year, month, day);
 
-      // Day shift plan
-      plans.push({
-        jia_ll_dshiftplanid: uuid(),
-        jia_date: dateStr,
-        jia_daynightshift: 'Day',
-        jia_colorshift: dayTeam,
-        jia_area: 'Packing',
-        jia_department: 'Dept-A',
-        statecode: 0 as const,
-        ownerid: '',
-        owneridtype: 'systemuser',
-        createdbyyominame: '',
-        createdonbehalfbyyominame: '',
-        modifiedbyyominame: '',
-        modifiedonbehalfbyyominame: '',
-        owneridname: '',
-        owneridyominame: '',
-        owningbusinessunitname: '',
-      } satisfies Jia_ll_dshiftplans);
+      for (const team of SHIFT_TEAMS) {
+        const shiftForDay = getTeamShiftForDay(team.color, dayOfYear);
+        if (shiftForDay === 'Rest') {
+          continue;
+        }
 
-      // Night shift plan
-      plans.push({
-        jia_ll_dshiftplanid: uuid(),
-        jia_date: dateStr,
-        jia_daynightshift: 'Night',
-        jia_colorshift: nightTeam,
-        jia_area: 'Packing',
-        jia_department: 'Dept-A',
-        statecode: 0 as const,
-        ownerid: '',
-        owneridtype: 'systemuser',
-        createdbyyominame: '',
-        createdonbehalfbyyominame: '',
-        modifiedbyyominame: '',
-        modifiedonbehalfbyyominame: '',
-        owneridname: '',
-        owneridyominame: '',
-        owningbusinessunitname: '',
-      } satisfies Jia_ll_dshiftplans);
+        plans.push({
+          jia_ll_dshiftplanid: uuid(),
+          jia_date: dateStr,
+          jia_daynightshift: shiftForDay,
+          jia_colorshift: team.color,
+          jia_area: 'Packing',
+          jia_department: 'Dept-A',
+          statecode: 0 as const,
+          ownerid: '',
+          owneridtype: 'systemuser',
+          createdbyyominame: '',
+          createdonbehalfbyyominame: '',
+          modifiedbyyominame: '',
+          modifiedonbehalfbyyominame: '',
+          owneridname: '',
+          owneridyominame: '',
+          owningbusinessunitname: '',
+        } satisfies Jia_ll_dshiftplans);
+      }
     }
   }
 

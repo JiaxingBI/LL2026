@@ -9,7 +9,7 @@ import React, { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Employee } from '../../types';
 import CustomSelect from '../ui/CustomSelect';
-import { GENDER_OPTIONS, ID_STATUS_OPTIONS, ROLE_OPTIONS, SHIFT_TEAM_VALUES, WORK_STATUS_OPTIONS } from '../../constants/attendanceOptions';
+import { buildGenderOptions, buildIdStatusOptions, buildRoleOptions, buildShiftTeamOptions, buildWorkStatusOptions } from '../../utils/displayLabels';
 
 interface CellChange {
   emp: Employee;
@@ -46,6 +46,11 @@ export function VirtualPivotTable({
   handleEmployeeUpdate,
 }: VirtualPivotTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const roleOptions = buildRoleOptions(t);
+  const idStatusOptions = buildIdStatusOptions(t);
+  const workStatusOptions = buildWorkStatusOptions(t);
+  const shiftTeamOptions = buildShiftTeamOptions(t);
+  const genderOptions = buildGenderOptions(t);
 
   const rowVirtualizer = useVirtualizer({
     count: employees.length,
@@ -135,7 +140,7 @@ export function VirtualPivotTable({
                     compact
                     value={emp.role}
                     onChange={v => handleEmployeeUpdate(emp.id, 'role', v)}
-                    options={ROLE_OPTIONS}
+                    options={roleOptions}
                   />
                 </td>
                 <td style={{ color: '#666', ...stickyCell(190, 70, rowBg) }}>
@@ -143,7 +148,7 @@ export function VirtualPivotTable({
                     compact
                     value={emp.indirectDirect}
                     onChange={v => handleEmployeeUpdate(emp.id, 'indirectDirect', v)}
-                    options={ID_STATUS_OPTIONS.map(option => ({ value: option.value, label: t(option.translationKey) }))}
+                    options={idStatusOptions}
                   />
                 </td>
                 <td style={{ color: '#666', ...stickyCell(260, 70, rowBg) }}>
@@ -151,7 +156,7 @@ export function VirtualPivotTable({
                     compact
                     value={emp.status}
                     onChange={v => handleEmployeeUpdate(emp.id, 'status', v)}
-                    options={WORK_STATUS_OPTIONS}
+                    options={workStatusOptions}
                   />
                 </td>
                 <td style={{ ...stickyCell(330, 70, rowBg) }}>
@@ -159,7 +164,7 @@ export function VirtualPivotTable({
                     compact
                     value={emp.shiftTeam}
                     onChange={v => handleEmployeeUpdate(emp.id, 'shiftTeam', v)}
-                    options={SHIFT_TEAM_VALUES.map(team => ({ value: team, label: t(`filter.${team.toLowerCase()}`) }))}
+                    options={shiftTeamOptions}
                   />
                 </td>
                 <td style={{ color: '#666', boxShadow: '2px 0 5px rgba(0,0,0,0.1)', ...stickyCell(400, 70, rowBg) }}>
@@ -167,7 +172,7 @@ export function VirtualPivotTable({
                     compact
                     value={emp.gender}
                     onChange={v => handleEmployeeUpdate(emp.id, 'gender', v)}
-                    options={GENDER_OPTIONS.map(option => ({ value: option.value, label: t(option.translationKey) }))}
+                    options={genderOptions}
                   />
                 </td>
 

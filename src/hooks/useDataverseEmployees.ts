@@ -27,7 +27,7 @@ export function useDataverseEmployees(isInitialized: boolean = true): UseDataver
 
   const loadData = useCallback(async () => {
     if (!isInitialized) {
-      setError('Power Platform SDK is not initialized yet.');
+      setError('common.sdkNotInitialized');
       setIsLoading(false);
       return;
     }
@@ -51,7 +51,7 @@ export function useDataverseEmployees(isInitialized: boolean = true): UseDataver
       });
     } catch (err) {
       console.error('Failed to load Dataverse employees:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load data from Dataverse');
+      setError(err instanceof Error ? err.message : 'common.dataverseLoadFailed');
     } finally {
       setIsLoading(false);
     }

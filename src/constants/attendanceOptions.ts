@@ -1,13 +1,13 @@
 import type { Role, ShiftTeam, WorkStatus } from '../types';
 
-export const ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
-  { value: 'TC.L1', label: 'TC.L1' },
-  { value: 'TC.L2', label: 'TC.L2' },
-  { value: 'TC.L3', label: 'TC.L3' },
-  { value: 'Hall Asist', label: 'Hall Asist' },
-  { value: 'Infeeder', label: 'Infeeder' },
-  { value: 'Sr.Infeeder', label: 'Sr.Infeeder' },
-  { value: 'Ops.L1', label: 'Ops.L1' },
+export const ROLE_OPTIONS: Array<{ value: Role; translationKey: string }> = [
+  { value: 'TC.L1', translationKey: 'role.tcL1' },
+  { value: 'TC.L2', translationKey: 'role.tcL2' },
+  { value: 'TC.L3', translationKey: 'role.tcL3' },
+  { value: 'Hall Asist', translationKey: 'role.hallAssist' },
+  { value: 'Infeeder', translationKey: 'role.infeeder' },
+  { value: 'Sr.Infeeder', translationKey: 'role.seniorInfeeder' },
+  { value: 'Ops.L1', translationKey: 'role.opsL1' },
 ];
 
 export const ID_STATUS_OPTIONS = [
@@ -15,10 +15,10 @@ export const ID_STATUS_OPTIONS = [
   { value: 'Indirect', translationKey: 'id.indirect' },
 ] as const;
 
-export const WORK_STATUS_OPTIONS: Array<{ value: WorkStatus; label: string }> = [
-  { value: 'Prod.', label: 'Prod.' },
-  { value: 'Jail', label: 'Jail' },
-  { value: 'DailyProduction', label: 'DailyProduction' },
+export const WORK_STATUS_OPTIONS: Array<{ value: WorkStatus; translationKey: string }> = [
+  { value: 'Prod.', translationKey: 'workStatus.production' },
+  { value: 'Jail', translationKey: 'workStatus.jail' },
+  { value: 'DailyProduction', translationKey: 'workStatus.dailyProduction' },
 ];
 
 export const GENDER_OPTIONS = [
